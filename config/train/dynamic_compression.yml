@@ -1,0 +1,104 @@
+# ------------------------------------------------------------------------
+# Custom NAFNet Config for On-the-Fly Compressed Synthetic Dataset
+# ------------------------------------------------------------------------
+
+name: Denoising_Model
+model_type: ImageRestorationModel
+scale: 1
+num_gpu: 1
+mixed_precision: true
+
+datasets:
+  train:
+    name: synthetic-train
+    type: CompressedNpyDataset
+    target_dir: /home/vk38/Photoacoustics/SyntheticData/Original/data_split/train
+    upsample_type: pinv  # or 'bicubic'
+    normalize: true
+    noise_std: 0.07
+    reshape_to_image: true
+    # compression_factor: 4  # Only needed if using 'bicubic'
+    A_path: /home/vk38/Photoacoustics/NAFNet/compression_matrices/matrices/A_naive_1x_128ch_v1.npy
+    num_worker_per_gpu: 1
+    batch_size_per_gpu: 8
+    use_shuffle: true
+    phase: train
+    pin_memory: true
+    save_debug_data: false
+    debug_save_dir: ./debug_pairs/train
+    debug_max_to_save: 100
+
+  val:
+    name: synthetic-val
+    type: CompressedNpyDataset
+    target_dir: /home/vk38/Photoacoustics/SyntheticData/Original/data_split/val
+    upsample_type: pinv
+    normalize: true
+    noise_std: 0.07
+    reshape_to_image: true
+    # compression_factor: 4
+    A_path: /home/vk38/Photoacoustics/NAFNet/compression_matrices/matrices/A_naive_1x_128ch_v1.npy
+    num_worker_per_gpu: 1
+    batch_size_per_gpu: 8
+    use_shuffle: false
+    phase: val
+    save_debug_data: false
+    debug_save_dir: ./debug_pairs/val
+    debug_max_to_save: 50
+network_g:
+  type: NAFNet
+  img_channel: 1
+  width: 32
+  enc_blk_nums: [1, 1, 1, 28]
+  middle_blk_num: 1
+  dec_blk_nums: [1, 1, 1, 1]
+
+path:
+  root: /home/vk38/Photoacoustics/NAFNet
+  experiments_root: /home/vk38/Photoacoustics/NAFNet/experiments
+  results_root: /home/vk38/Photoacoustics/NAFNet/results
+  pretrain_network_g: ~
+  strict_load_g: true
+  resume_state: ~
+
+train:
+  optim_g:
+    type: AdamW
+    lr: !!float 1e-3
+    weight_decay: !!float 1e-3
+    betas: [0.9, 0.9]
+
+  scheduler:
+    type: TrueCosineAnnealingLR
+    T_max: 200000
+    eta_min: !!float 1e-7
+
+  total_iter: 50000
+  warmup_iter: -1
+
+  pixel_opt:
+    type: MSELoss
+    loss_weight: 1
+    reduction: mean
+
+val:
+  val_freq: !!float 5e2
+  save_img: false
+  use_image: false
+  metrics:
+    mse:
+      type: calculate_mse
+      crop_border: 0
+      test_y_channel: false
+
+logger:
+  print_freq: 100
+  save_checkpoint_freq: !!float 5e2
+  use_tb_logger: true
+  wandb:
+    project: ~
+    resume_id: ~
+
+dist_params:
+  backend: nccl
+  port: 2950
