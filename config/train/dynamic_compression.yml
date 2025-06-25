@@ -12,37 +12,37 @@ datasets:
   train:
     name: synthetic-train
     type: CompressedNpyDataset
-    target_dir: /home/vk38/Photoacoustics/SyntheticData/Original/data_split/train
+    target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/25x_Averaged/Original/data_split/train
     upsample_type: pinv  # or 'bicubic'
     normalize: true
     noise_std: 0.07
     reshape_to_image: true
     # compression_factor: 4  # Only needed if using 'bicubic'
-    A_path: /home/vk38/Photoacoustics/NAFNet/compression_matrices/matrices/A_naive_1x_128ch_v1.npy
+    A_path: /home/vk38/E2E-Photoacoustic-CS/compression_matrices/matrices/A_naive_1x_128ch_v1.npy
     num_worker_per_gpu: 1
     batch_size_per_gpu: 8
     use_shuffle: true
     phase: train
     pin_memory: true
-    save_debug_data: false
+    save_debug_data: true
     debug_save_dir: ./debug_pairs/train
     debug_max_to_save: 100
 
   val:
     name: synthetic-val
     type: CompressedNpyDataset
-    target_dir: /home/vk38/Photoacoustics/SyntheticData/Original/data_split/val
+    target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/25x_Averaged/Original/data_split/val
     upsample_type: pinv
     normalize: true
     noise_std: 0.07
     reshape_to_image: true
     # compression_factor: 4
-    A_path: /home/vk38/Photoacoustics/NAFNet/compression_matrices/matrices/A_naive_1x_128ch_v1.npy
+    A_path: /home/vk38/E2E-Photoacoustic-CS/compression_matrices/matrices/A_naive_1x_128ch_v1.npy
     num_worker_per_gpu: 1
     batch_size_per_gpu: 8
     use_shuffle: false
     phase: val
-    save_debug_data: false
+    save_debug_data: true
     debug_save_dir: ./debug_pairs/val
     debug_max_to_save: 50
 network_g:
@@ -54,9 +54,9 @@ network_g:
   dec_blk_nums: [1, 1, 1, 1]
 
 path:
-  root: /home/vk38/Photoacoustics/NAFNet
-  experiments_root: /home/vk38/Photoacoustics/NAFNet/experiments
-  results_root: /home/vk38/Photoacoustics/NAFNet/results
+  root: /home/vk38/E2E-Photoacoustic-CS/
+  experiments_root: /home/vk38/E2E-Photoacoustic-CS/experiments
+  results_root: /home/vk38/E2E-Photoacoustic-CS/results
   pretrain_network_g: ~
   strict_load_g: true
   resume_state: ~
