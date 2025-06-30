@@ -6,8 +6,6 @@
 # ------------------------------------------------------------------------
 # Modified by VK (2025)
 # ------------------------------------------------------------------------
-import basicsr
-print("Using basicsr from:", getattr(basicsr, '__file__', 'Not a file-based module'))
 
 import os
 
@@ -332,6 +330,4 @@ def main():
 if __name__ == '__main__':
     import os
     os.environ['GRPC_POLL_STRATEGY']='epoll1'
-    import basicsr
-    print("Using basicsr from:", basicsr.__file__)
     main()

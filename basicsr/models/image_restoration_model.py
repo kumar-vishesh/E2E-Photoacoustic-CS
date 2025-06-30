@@ -18,6 +18,7 @@ from basicsr.models.archs import define_network
 from basicsr.models.base_model import BaseModel
 from basicsr.utils import get_root_logger, imwrite, tensor2img
 from basicsr.utils.dist_util import get_dist_info
+from basicsr.models.modules.learned_cs_matrix import LearnableCompressionMatrix
 
 loss_module = importlib.import_module('basicsr.models.losses')
 metric_module = importlib.import_module('basicsr.metrics')
@@ -31,6 +32,13 @@ class ImageRestorationModel(BaseModel):
         # define network
         self.net_g = define_network(deepcopy(opt['network_g']))
         self.net_g = self.model_to_device(self.net_g)
+        
+        if self.is_train:
+            num_channels = opt['num_input_channels']
+            compression_ratio = opt['compression_ratio']
+
+
+            self.cs_matrix = LearnableCompressionMatrix(c=compression_ratio, n=num_channels).to(self.device)
 
         # load pretrained models
         load_path = self.opt['path'].get('pretrain_network_g', None)
@@ -86,6 +94,7 @@ class ImageRestorationModel(BaseModel):
             #     logger.warning(f'Params {k} will not be optimized.')
         # print(optim_params)
         # ratio = 0.1
+        optim_params += list(self.cs_matrix.parameters())
 
         optim_type = train_opt['optim_g'].pop('type')
         if optim_type == 'Adam':
@@ -193,6 +202,21 @@ class ImageRestorationModel(BaseModel):
 
         if self.opt['train'].get('mixup', False):
             self.mixup_aug()
+            
+        # (B, C, T) → compress channels
+        Ax, A = self.cs_matrix(self.lq)                 # (B, m, T)
+
+        # Compute pseudo-inverse of A (shared across batch)
+        A_pinv = torch.linalg.pinv(A)                   # (n, m)
+
+        # Reconstruct original signal shape: (B, n, T)
+        x_recon = torch.matmul(A_pinv.unsqueeze(0), Ax)
+
+        # Reshape for NAFNet (expects B x 1 x H x W)
+        x_recon = x_recon.unsqueeze(1) 
+
+        # Feed into NAFNet
+        preds = self.net_g(x_recon)
 
         preds = self.net_g(self.lq)
         if not isinstance(preds, list):

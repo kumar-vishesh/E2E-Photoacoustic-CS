@@ -2,7 +2,7 @@
 # Custom NAFNet Config for On-the-Fly Compressed Synthetic Dataset
 # ------------------------------------------------------------------------
 
-name: Denoising_Model
+name: Learnable_CS_Matrix
 model_type: ImageRestorationModel
 scale: 1
 num_gpu: 1
@@ -11,14 +11,14 @@ mixed_precision: true
 datasets:
   train:
     name: synthetic-train
-    type: CompressedNpyDataset
+    type: UncompressedNpyDataset
     target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/25x_Averaged/Original/data_split/train
     upsample_type: pinv  # or 'bicubic'
     normalize: true
-    noise_std: 0.07
+    noise_std: 0.01
     reshape_to_image: true
     # compression_factor: 4  # Only needed if using 'bicubic'
-    A_path: /home/vk38/E2E-Photoacoustic-CS/compression_matrices/matrices/A_naive_1x_128ch_v1.npy
+    # A_path: /home/vk38/E2E-Photoacoustic-CS/compression_matrices/matrices/A_naive_1x_128ch_v1.npy
     num_worker_per_gpu: 1
     batch_size_per_gpu: 8
     use_shuffle: true
@@ -30,14 +30,14 @@ datasets:
 
   val:
     name: synthetic-val
-    type: CompressedNpyDataset
+    type: UncompressedNpyDataset
     target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/25x_Averaged/Original/data_split/val
     upsample_type: pinv
     normalize: true
-    noise_std: 0.07
+    noise_std: 0.01
     reshape_to_image: true
     # compression_factor: 4
-    A_path: /home/vk38/E2E-Photoacoustic-CS/compression_matrices/matrices/A_naive_1x_128ch_v1.npy
+    # A_path: /home/vk38/E2E-Photoacoustic-CS/compression_matrices/matrices/A_naive_1x_128ch_v1.npy
     num_worker_per_gpu: 1
     batch_size_per_gpu: 8
     use_shuffle: false
@@ -45,6 +45,7 @@ datasets:
     save_debug_data: true
     debug_save_dir: ./debug_pairs/val
     debug_max_to_save: 50
+
 network_g:
   type: NAFNet
   img_channel: 1
@@ -52,6 +53,11 @@ network_g:
   enc_blk_nums: [1, 1, 1, 28]
   middle_blk_num: 1
   dec_blk_nums: [1, 1, 1, 1]
+  
+# For learnable compression
+num_input_channels: 128         # number of transducers
+compression_ratio: 8            # 8x compression
+
 
 path:
   root: /home/vk38/E2E-Photoacoustic-CS/
