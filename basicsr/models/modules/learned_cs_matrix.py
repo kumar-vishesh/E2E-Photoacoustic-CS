@@ -10,14 +10,6 @@ class LearnableCompressionMatrix(nn.Module):
     """
 
     def __init__(self, c: int, n: int):
-        """
-        Parameters
-        ----------
-        c : int
-            Compression ratio (e.g., 8 means compress from 128 to 16 channels).
-        n : int
-            Number of input channels (e.g., 128 transducers).
-        """
         super().__init__()
 
         if not isinstance(c, int) or c <= 0:
@@ -28,7 +20,18 @@ class LearnableCompressionMatrix(nn.Module):
         self.n = n
         self.c = c
         self.m = n // c
-        self.A = nn.Parameter(torch.randn(self.m, self.n) * 0.1)
+
+        # Create blocksum matrix
+        A = torch.zeros(self.m, self.n)
+        for i in range(self.m):
+            A[i, i * c: (i + 1) * c] = 1.0
+
+        # Add small noise
+        noise_std = 0.001
+        A += torch.randn_like(A) * noise_std
+
+        self.A = nn.Parameter(A)
+
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
