@@ -1,16 +1,3 @@
-"""
-evaluation.py
-
-Evaluates a trained NAFNet model with a learnable compression matrix on .npy data.
-Performs compression, reconstruction, and inference, saving both intermediate
-results and visualizations.
-
-This script assumes a model defined via a YAML file and a checkpoint path.
-
-Author: vk38
-Modified: 2025-07-02
-"""
-
 import os
 import argparse
 import numpy as np
@@ -164,7 +151,7 @@ def load_model_from_opt(opt_path, ckpt_path):
     # Print compression matrix stats if it exists
     if hasattr(model.net_g, 'cs_matrix'):
         A_weights = model.net_g.cs_matrix.A.detach().cpu().numpy()
-        print("▶ Loaded compression matrix A stats:")
+        print("Loaded compression matrix A stats:")
         print(f" - Shape: {A_weights.shape}")
         print(f" - Mean:  {A_weights.mean():.4f}")
         print(f" - Std:   {A_weights.std():.4f}")
@@ -262,10 +249,10 @@ def main():
     parser.add_argument('--device', type=str, default='cuda', help='Device to use')
     args = parser.parse_args()
 
-    print(f"\n▶ Loading model from: {args.ckpt}")
+    print(f"\nLoading model from: {args.ckpt}")
     model, opt = load_model_from_opt(args.opt, args.ckpt)
 
-    print(f"▶ Loading test data from: {args.input_dir}")
+    print(f"Loading test data from: {args.input_dir}")
     dataset_opt = {
         'target_dir': args.input_dir,
         'phase': 'val'
@@ -273,7 +260,7 @@ def main():
     test_set = CompressedNpyDataset(dataset_opt)
     dataloader = DataLoader(test_set, batch_size=1, shuffle=False, num_workers=0)
 
-    print(f"▶ Running inference and saving to: {args.output_dir}")
+    print(f"Running inference and saving to: {args.output_dir}")
     run_inference(model, dataloader, args.output_dir, opt, device=args.device)
 
 

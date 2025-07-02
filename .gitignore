@@ -9,3 +9,5 @@ datasets
 basicsr.egg-info
 debug_pairs/
 tb_logger/
+gifs/
+*.log
