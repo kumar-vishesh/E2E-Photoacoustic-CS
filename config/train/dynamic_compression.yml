@@ -2,7 +2,7 @@
 # Custom NAFNet Config for On-the-Fly Compressed Synthetic Dataset
 # ------------------------------------------------------------------------
 
-name: Learnable_CS_Matrix_32x_Annealing
+name: Learnable_CS_Matrix_4x_Annealing
 model_type: ImageRestorationModel
 scale: 1
 num_gpu: 1
@@ -44,7 +44,7 @@ network_g:
   middle_blk_num: 1
   dec_blk_nums: [1, 1, 1, 1]
   num_input_channels: 128
-  compression_ratio: 32  
+  compression_ratio: 4  
 
 path:
   root: /home/vk38/E2E-Photoacoustic-CS/
