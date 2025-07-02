@@ -13,12 +13,13 @@ from collections import OrderedDict
 from copy import deepcopy
 from os import path as osp
 from tqdm import tqdm
+import numpy as np
+import matplotlib.pyplot as plt
 
 from basicsr.models.archs import define_network
 from basicsr.models.base_model import BaseModel
 from basicsr.utils import get_root_logger, imwrite, tensor2img
 from basicsr.utils.dist_util import get_dist_info
-from basicsr.models.modules.learned_cs_matrix import LearnableCompressionMatrix
 
 loss_module = importlib.import_module('basicsr.models.losses')
 metric_module = importlib.import_module('basicsr.metrics')
@@ -32,13 +33,6 @@ class ImageRestorationModel(BaseModel):
         # define network
         self.net_g = define_network(deepcopy(opt['network_g']))
         self.net_g = self.model_to_device(self.net_g)
-        
-        if self.is_train:
-            num_channels = opt['num_input_channels']
-            compression_ratio = opt['compression_ratio']
-
-
-            self.cs_matrix = LearnableCompressionMatrix(c=compression_ratio, n=num_channels).to(self.device)
 
         # load pretrained models
         load_path = self.opt['path'].get('pretrain_network_g', None)
@@ -94,7 +88,13 @@ class ImageRestorationModel(BaseModel):
             #     logger.warning(f'Params {k} will not be optimized.')
         # print(optim_params)
         # ratio = 0.1
-        optim_params += list(self.cs_matrix.parameters())
+
+        # if getattr(self.net_g, 'use_compression', False):
+        #     cs_params = list(self.net_g.cs_matrix.parameters())
+        #     existing_ids = set(id(p) for p in optim_params)
+        #     for p in cs_params:
+        #         if id(p) not in existing_ids:
+        #             optim_params.append(p)
 
         optim_type = train_opt['optim_g'].pop('type')
         if optim_type == 'Adam':
@@ -203,22 +203,14 @@ class ImageRestorationModel(BaseModel):
         if self.opt['train'].get('mixup', False):
             self.mixup_aug()
             
-        # (B, C, T) → compress channels
-        Ax, A = self.cs_matrix(self.lq)                 # (B, m, T)
+        if getattr(self.net_g, 'use_compression', False):
+            x_recon, _, _ = self.net_g.apply_compression(self.lq)
+            x_recon = x_recon.unsqueeze(1)
+        else:
+            x_recon = self.lq  # fallback (no compression)
 
-        # Compute pseudo-inverse of A (shared across batch)
-        A_pinv = torch.linalg.pinv(A)                   # (n, m)
-
-        # Reconstruct original signal shape: (B, n, T)
-        x_recon = torch.matmul(A_pinv.unsqueeze(0), Ax)
-
-        # Reshape for NAFNet (expects B x 1 x H x W)
-        x_recon = x_recon.unsqueeze(1) 
-
-        # Feed into NAFNet
         preds = self.net_g(x_recon)
 
-        preds = self.net_g(self.lq)
         if not isinstance(preds, list):
             preds = [preds]
 
@@ -270,7 +262,15 @@ class ImageRestorationModel(BaseModel):
                 j = i + m
                 if j >= n:
                     j = n
-                pred = self.net_g(self.lq[i:j])
+
+                inputs = self.lq[i:j]
+                if getattr(self.net_g, 'use_compression', False):
+                    x_recon, _, _ = self.net_g.apply_compression(inputs)
+                    x_recon = x_recon.unsqueeze(1)
+                else:
+                    x_recon = inputs
+
+                pred = self.net_g(x_recon)
                 if isinstance(pred, list):
                     pred = pred[-1]
                 outs.append(pred.detach().cpu())
@@ -278,6 +278,7 @@ class ImageRestorationModel(BaseModel):
 
             self.output = torch.cat(outs, dim=0)
         self.net_g.train()
+
 
     def dist_validation(self, dataloader, current_iter, tb_logger, save_img, rgb2bgr, use_image):
         dataset_name = dataloader.dataset.opt['name']
@@ -526,3 +527,22 @@ class ImageRestorationModel(BaseModel):
     def save(self, epoch, current_iter):
         self.save_network(self.net_g, 'net_g', current_iter)
         self.save_training_state(epoch, current_iter)
+       
+        # --- Save compression matrix A if used ---
+        if getattr(self.net_g, 'use_compression', False):
+            A = self.net_g.cs_matrix.A.detach().cpu().numpy()
+
+            # Save as .npy
+            save_dir = self.opt['path']['experiments_root']
+            np.save(osp.join(save_dir, 'compression_matrix.npy'), A)
+
+            # Save as heatmap PNG
+            plt.figure(figsize=(6, 5))
+            im = plt.imshow(A, aspect='auto', cmap='viridis')
+            plt.colorbar(im, shrink=0.8)
+            plt.title("Learned Compression Matrix A")
+            plt.xlabel("Original Channels")
+            plt.ylabel("Compressed Channels")
+            plt.tight_layout()
+            plt.savefig(osp.join(save_dir, 'compression_matrix.png'), dpi=300)
+            plt.close()

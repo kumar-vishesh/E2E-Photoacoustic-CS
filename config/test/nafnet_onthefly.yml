@@ -1,49 +1,27 @@
-# ----------------------------------------------------------------
-# Custom NAFNet Config for On-the-Fly Compressed Synthetic Dataset
-# ----------------------------------------------------------------
+# ------------------------------------------------------------------------
+# NAFNet Evaluation Config with Learnable Compression Matrix A
+# ------------------------------------------------------------------------
 
-name: NAFNet-Synthetic-OnTheFly_Test
+name: LearnableCS_Eval
 model_type: ImageRestorationModel
 scale: 1
 num_gpu: 1
 manual_seed: 42
+dist: false
 
 datasets:
   test:
-    name: synthetic-val
-    type: CompressedNpyDataset
-    target_dir: /home/vk38/Photoacoustics/SyntheticData/Dataset/val
-    upsample_type: pinv  # or 'bicubic'
-    normalize: true
-    noise_std: 0.01
-    reshape_to_image: true
-    # compression_factor: 4  # Only needed if using 'bicubic'
-    A_path: DUMMY_TO_BE_REPLACED
-    num_worker_per_gpu: 1
-    batch_size_per_gpu: 1   # Important for consistent MSE eval
-    use_shuffle: false
-    phase: test
-    save_debug_data: false
-    debug_save_dir: ./debug_pairs/val
-    debug_max_to_save: 50
-
-  train_test:
-    name: synthetic-train
-    type: CompressedNpyDataset
-    target_dir: /home/vk38/Photoacoustics/SyntheticData/Dataset/train
+    name: custom-test
+    type: UncompressedNpyDataset
+    target_dir: DUMMY_TO_BE_REPLACED   # Will be set by --input_dir
     upsample_type: pinv
     normalize: true
-    noise_std: 0.01
+    noise_std: 0.0
     reshape_to_image: true
-    # compression_factor: 4
-    A_path: DUMMY_TO_BE_REPLACED
     num_worker_per_gpu: 1
     batch_size_per_gpu: 1
     use_shuffle: false
     phase: test
-    save_debug_data: false
-    debug_save_dir: ./debug_pairs/train
-    debug_max_to_save: 100
 
 network_g:
   type: NAFNet
@@ -52,17 +30,21 @@ network_g:
   enc_blk_nums: [1, 1, 1, 28]
   middle_blk_num: 1
   dec_blk_nums: [1, 1, 1, 1]
+  # For the learnable compression matrix A
+  num_input_channels: 128       # Must match training
+  compression_ratio: 8          # Must match training
 
 path:
-  root: /home/vk38/Photoacoustics/NAFNet_Experiments
-  experiments_root: /home/vk38/Photoacoustics/NAFNet_Experiments/experiments
-  results_root: /home/vk38/Photoacoustics/NAFNet_Experiments/results
-  pretrain_network_g: ~  # this will be overwritten in multi_eval.py per checkpoint
+  root: /home/vk38/E2E-Photoacoustic-CS/
+  experiments_root: /home/vk38/E2E-Photoacoustic-CS/experiments
+  results_root: /home/vk38/E2E-Photoacoustic-CS/results
+  pretrain_network_g: ~   # Will be overwritten by --ckpt argument
   strict_load_g: true
 
 val:
+  save_img: true
   use_image: false
-  save_img: false
+  rgb2bgr: false  # Grayscale
   metrics:
     mse:
       type: calculate_mse

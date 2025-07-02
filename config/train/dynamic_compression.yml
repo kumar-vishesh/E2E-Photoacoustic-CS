@@ -2,7 +2,7 @@
 # Custom NAFNet Config for On-the-Fly Compressed Synthetic Dataset
 # ------------------------------------------------------------------------
 
-name: Learnable_CS_Matrix
+name: Learnable_CS_Matrix_12x_Annealing
 model_type: ImageRestorationModel
 scale: 1
 num_gpu: 1
@@ -12,39 +12,29 @@ datasets:
   train:
     name: synthetic-train
     type: UncompressedNpyDataset
-    target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/25x_Averaged/Original/data_split/train
-    upsample_type: pinv  # or 'bicubic'
+    target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/25x_Averaged/Padded/data_split/train
+    upsample_type: pinv
     normalize: true
     noise_std: 0.01
     reshape_to_image: true
-    # compression_factor: 4  # Only needed if using 'bicubic'
-    # A_path: /home/vk38/E2E-Photoacoustic-CS/compression_matrices/matrices/A_naive_1x_128ch_v1.npy
     num_worker_per_gpu: 1
     batch_size_per_gpu: 8
     use_shuffle: true
     phase: train
     pin_memory: true
-    save_debug_data: true
-    debug_save_dir: ./debug_pairs/train
-    debug_max_to_save: 100
 
   val:
     name: synthetic-val
     type: UncompressedNpyDataset
-    target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/25x_Averaged/Original/data_split/val
+    target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/25x_Averaged/Padded/data_split/val
     upsample_type: pinv
     normalize: true
     noise_std: 0.01
     reshape_to_image: true
-    # compression_factor: 4
-    # A_path: /home/vk38/E2E-Photoacoustic-CS/compression_matrices/matrices/A_naive_1x_128ch_v1.npy
     num_worker_per_gpu: 1
     batch_size_per_gpu: 8
     use_shuffle: false
     phase: val
-    save_debug_data: true
-    debug_save_dir: ./debug_pairs/val
-    debug_max_to_save: 50
 
 network_g:
   type: NAFNet
@@ -53,11 +43,8 @@ network_g:
   enc_blk_nums: [1, 1, 1, 28]
   middle_blk_num: 1
   dec_blk_nums: [1, 1, 1, 1]
-  
-# For learnable compression
-num_input_channels: 128         # number of transducers
-compression_ratio: 8            # 8x compression
-
+  num_input_channels: 132    
+  compression_ratio: 12            
 
 path:
   root: /home/vk38/E2E-Photoacoustic-CS/
@@ -70,16 +57,16 @@ path:
 train:
   optim_g:
     type: AdamW
-    lr: !!float 1e-3
+    lr: !!float 1e-2
     weight_decay: !!float 1e-3
     betas: [0.9, 0.9]
 
   scheduler:
     type: TrueCosineAnnealingLR
-    T_max: 200000
-    eta_min: !!float 1e-7
+    T_max: 100000
+    eta_min: !!float 1e-6
 
-  total_iter: 50000
+  total_iter: 100000
   warmup_iter: -1
 
   pixel_opt:
@@ -88,7 +75,7 @@ train:
     reduction: mean
 
 val:
-  val_freq: !!float 5e2
+  val_freq: !!float 1e3
   save_img: false
   use_image: false
   metrics:
@@ -99,7 +86,7 @@ val:
 
 logger:
   print_freq: 100
-  save_checkpoint_freq: !!float 5e2
+  save_checkpoint_freq: !!float 1e3
   use_tb_logger: true
   wandb:
     project: ~

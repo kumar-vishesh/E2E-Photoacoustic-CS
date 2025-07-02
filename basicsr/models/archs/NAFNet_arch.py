@@ -1,6 +1,8 @@
 # ------------------------------------------------------------------------
 # Copyright (c) 2022 megvii-model. All Rights Reserved.
 # ------------------------------------------------------------------------
+# Modified by: VK (2025)
+# ------------------------------------------------------------------------
 
 '''
 Simple Baselines for Image Restoration
@@ -82,8 +84,18 @@ class NAFBlock(nn.Module):
 
 class NAFNet(nn.Module):
 
-    def __init__(self, img_channel=3, width=16, middle_blk_num=1, enc_blk_nums=[], dec_blk_nums=[]):
+    def __init__(self, img_channel=3, width=16, middle_blk_num=1, enc_blk_nums=[], dec_blk_nums=[],
+             compression_ratio=None, num_input_channels=None):
+
         super().__init__()
+        
+        # Initialize compression matrix if config provides it
+        from basicsr.models.modules.learned_cs_matrix import LearnableCompressionMatrix
+        if compression_ratio is not None and num_input_channels is not None:
+            self.use_compression = True
+            self.cs_matrix = LearnableCompressionMatrix(c=compression_ratio, n=num_input_channels)
+        else:
+            self.use_compression = False
 
         self.intro = nn.Conv2d(in_channels=img_channel, out_channels=width, kernel_size=3, padding=1, stride=1, groups=1,
                               bias=True)
@@ -160,6 +172,36 @@ class NAFNet(nn.Module):
         mod_pad_w = (self.padder_size - w % self.padder_size) % self.padder_size
         x = F.pad(x, (0, mod_pad_w, 0, mod_pad_h))
         return x
+
+    def apply_compression(self, x):
+        """
+        Apply the learnable compression matrix A to reduce channel dimensionality.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor of shape (B, 1, C, T) or (B, C, T), where:
+            - B is the batch size
+            - C is the number of input channels (e.g., transducers)
+            - T is the number of time steps
+
+        Returns
+        -------
+        x_recon : torch.Tensor
+            Reconstructed input from compressed form, of shape (B, C, T)
+        A : torch.Tensor
+            The learned compression matrix of shape (m, C)
+        Ax : torch.Tensor
+            Compressed signal of shape (B, m, T), where m = C // compression_ratio
+        """
+        if not self.use_compression:
+            raise RuntimeError("Compression matrix was not initialized in NAFNet.")
+
+        Ax, A = self.cs_matrix(x)
+        A_pinv = torch.linalg.pinv(A)
+        x_recon = torch.matmul(A_pinv.unsqueeze(0), Ax)
+        return x_recon, A, Ax
+
 
 class NAFNetLocal(Local_Base, NAFNet):
     def __init__(self, *args, train_size=(1, 3, 256, 256), fast_imp=False, **kwargs):
