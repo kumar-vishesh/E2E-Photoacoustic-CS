@@ -143,9 +143,10 @@ def plot_mse_curve(iters, mses, current_index, title=None):
         Line plot image
     """
     fig, ax = plt.subplots(figsize=(6, 5))
-    ax.plot(iters[:current_index+1], np.log10(mses[:current_index+1]), marker='o')
+    ax.plot(iters[:current_index+1], mses[:current_index+1], marker='o')
+    ax.set_yscale("log")  # Set y-axis to log scale
     ax.set_xlabel("Iteration")
-    ax.set_ylabel("log10(MSE)")
+    ax.set_ylabel("MSE (log scale)")  # Updated label
     if title:
         ax.set_title(title)
     plt.tight_layout()
