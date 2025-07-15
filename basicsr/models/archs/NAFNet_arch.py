@@ -90,10 +90,10 @@ class NAFNet(nn.Module):
         super().__init__()
         
         # Initialize compression matrix if config provides it
-        from basicsr.models.modules.learned_cs_matrix import LearnableCompressionMatrix
+        from basicsr.models.modules.blockwise_matrix import BlockLearnableCompressionMatrix
         if compression_ratio is not None and num_input_channels is not None:
             self.use_compression = True
-            self.cs_matrix = LearnableCompressionMatrix(c=compression_ratio, n=num_input_channels)
+            self.cs_matrix = BlockLearnableCompressionMatrix(c=compression_ratio, n=num_input_channels)
         else:
             self.use_compression = False
 
