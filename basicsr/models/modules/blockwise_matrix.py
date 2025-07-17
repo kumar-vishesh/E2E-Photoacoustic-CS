@@ -11,7 +11,7 @@ class BlockLearnableCompressionMatrix(nn.Module):
     These blocks are placed along the diagonal in a sparse (m × n) matrix.
     """
 
-    def __init__(self, c: int, n: int, noise_std: float = 1e-3):
+    def __init__(self, c: int, n: int, noise_std: float = 1e-1):
         super().__init__()
 
         if not isinstance(c, int) or c <= 0:

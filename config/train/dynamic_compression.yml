@@ -2,7 +2,7 @@
 # Custom NAFNet Config for On-the-Fly Compressed Synthetic Dataset
 # ------------------------------------------------------------------------
 
-name: Block_Learnable_CS_Matrix_12x
+name: Block_Noisier_Learnable_CS_Matrix_12x
 model_type: ImageRestorationModel
 scale: 1
 num_gpu: 1
