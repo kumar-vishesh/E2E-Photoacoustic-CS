@@ -6,8 +6,9 @@ class BlockLearnableCompressionMatrix(nn.Module):
     """
     A block-wise learnable channel compression layer for PA signals.
 
-    Only the c×c blocks along the diagonal are learned; everything else stays zero.
-    Exposes `.A` so old save routines still find the full matrix.
+    Each of the `m = n // c` rows of the compression matrix learns a 
+    distinct `1 × c` block of weights applied to a disjoint subset of `c` channels.
+    These blocks are placed along the diagonal in a sparse (m × n) matrix.
     """
 
     def __init__(self, c: int, n: int, noise_std: float = 1e-3):
@@ -35,9 +36,10 @@ class BlockLearnableCompressionMatrix(nn.Module):
     @property
     def A(self) -> torch.Tensor:
         """
-        The full (m×n) compression matrix, with each row i 
-        having its learned c entries in columns [i*c:(i+1)*c].
+        Returns the full (m × n) compression matrix A, where each row `i`
+        has its learned `c` values (from `W[i]`) inserted in columns `[i * c : (i + 1) * c]`.
         """
+
         # build it on the current device / dtype
         device = self.W.device
         dtype = self.W.dtype

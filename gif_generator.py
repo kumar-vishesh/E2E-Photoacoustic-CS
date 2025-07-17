@@ -1,14 +1,3 @@
-# gif_generator.py
-
-"""
-Generates two GIFs:
-1. Compression matrix heatmap per checkpoint (net_g_*.pth).
-2. Validation MSE curve over training iterations (log scale).
-
-Author: vk38
-Modified: 2025-07-02
-"""
-
 import os
 import glob
 import argparse
@@ -34,12 +23,12 @@ def extract_A_from_checkpoint(pth_file):
         Compression matrix A of shape (m, n)
     """
     ckpt = torch.load(pth_file, map_location='cpu')
-    if 'params' in ckpt and 'cs_matrix.A' in ckpt['params']:
-        A_tensor = ckpt['params']['cs_matrix.A']
-    elif 'model' in ckpt and 'cs_matrix.A' in ckpt['model']:
-        A_tensor = ckpt['model']['cs_matrix.A']
+    if 'params' in ckpt and 'cs_matrix.W' in ckpt['params']:
+        A_tensor = ckpt['params']['cs_matrix.W']
+    elif 'model' in ckpt and 'cs_matrix.W' in ckpt['model']:
+        A_tensor = ckpt['model']['cs_matrix.W']
     else:
-        raise KeyError(f"No compression matrix 'cs_matrix.A' found in {pth_file}")
+        raise KeyError(f"No compression matrix 'cs_matrix.W' found in {pth_file}")
     return A_tensor.cpu().numpy()
 
 
