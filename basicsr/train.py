@@ -271,6 +271,29 @@ def main():
             # training
             model.feed_data(train_data, is_val=False)
             result_code = model.optimize_parameters(current_iter, tb_logger)
+
+            if current_iter % opt['logger']['print_freq'] == 0 and opt['rank'] == 0:
+                try:
+                    compression_module = model.net_g.cs_matrix
+                    blocks = [
+                        getattr(compression_module, f'block{i+1}').detach().cpu()
+                        for i in range(compression_module.m)
+                    ]
+
+                    sims = torch.zeros((len(blocks), len(blocks)))
+                    for i in range(len(blocks)):
+                        for j in range(len(blocks)):
+                            if i != j:
+                                sims[i, j] = torch.nn.functional.cosine_similarity(
+                                    blocks[i], blocks[j], dim=0)
+
+                    mean_sim = sims[sims != 0].mean().item()
+                    max_sim = sims[sims != 0].max().item()
+                    min_sim = sims[sims != 0].min().item()
+                    logger.info(f'[Diag] Iter {current_iter}: Block similarity - mean: {mean_sim:.4f}, min: {min_sim:.4f}, max: {max_sim:.4f}')
+                except Exception as e:
+                    logger.warning(f'[Diag] Block similarity check failed: {e}')
+
             # if result_code == -1 and tb_logger:
             #     print('loss explode .. ')
             #     exit(0)

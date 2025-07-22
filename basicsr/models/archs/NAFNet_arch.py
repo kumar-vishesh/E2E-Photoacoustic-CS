@@ -196,7 +196,6 @@ class NAFNet(nn.Module):
         """
         if not self.use_compression:
             raise RuntimeError("Compression matrix was not initialized in NAFNet.")
-
         Ax, A = self.cs_matrix(x)
         A_pinv = torch.linalg.pinv(A)
         x_recon = torch.matmul(A_pinv.unsqueeze(0), Ax)

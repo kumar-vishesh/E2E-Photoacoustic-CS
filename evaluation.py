@@ -1,13 +1,18 @@
 import os
-import argparse
-import numpy as np
-import matplotlib.pyplot as plt
+import re
 import torch
+import random
+import numpy as np
 from tqdm import tqdm
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from torchvision.utils import save_image
+import argparse
+import time
+import yaml
 
-# --- Limit threads for deterministic performance ---
+# ------------------------
+# Environment Config
+# ------------------------
 os.environ['OMP_NUM_THREADS'] = '1'
 os.environ['MKL_NUM_THREADS'] = '1'
 os.environ['OPENBLAS_NUM_THREADS'] = '1'
@@ -15,254 +20,174 @@ os.environ['NUMEXPR_NUM_THREADS'] = '1'
 torch.set_num_threads(1)
 torch.set_num_interop_threads(1)
 
-# --- BasicSR framework imports ---
-from basicsr.models import create_model
-from basicsr.utils.options import parse
+# ------------------------
+# Custom Imports
+# ------------------------
+from basicsr.models.archs.NAFNet_arch import NAFNet
 
+# ------------------------
+# Config Path
+# ------------------------
+CONFIG_PATH = '/home/vk38/E2E-Photoacoustic-CS/config/test/temp.yml'
 
-class CompressedNpyDataset(torch.utils.data.Dataset):
-    """
-    PyTorch Dataset to load .npy files representing 2D tensors.
+# ------------------------
+# Argument Parsing
+# ------------------------
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--data_root', type=str, required=True,
+                        help='Path to data root containing data_split/train and val')
+    parser.add_argument('--model_root', type=str, required=True,
+                        help='Path to experiment dir containing "models" subfolder')
+    parser.add_argument('--results_root', type=str, required=True,
+                        help='Output directory for saving PNGs')
+    parser.add_argument('--compression_ratio', type=int, required=True,
+                        help='Compression ratio used during training (e.g. 4, 8, 16)')
+    parser.add_argument('--num_channels', type=int, required=True,
+                        help='Number of input channels (typically 128)')
+    return parser.parse_args()
 
-    Parameters
-    ----------
-    opt : dict
-        Configuration dictionary containing:
-        - 'target_dir': path to directory with .npy files
-        - 'normalize': whether to normalize input
-        - 'reshape_to_image': whether to reshape to (1, C, T)
-
-    Returns
-    -------
-    dict
-        Dictionary with keys:
-        - 'lq': low-quality (input)
-        - 'gt': ground truth (same as input)
-        - 'lq_path': original path
-    """
-    def __init__(self, opt):
-        self.opt = opt
-        self.file_list = sorted([
-            os.path.join(opt['target_dir'], f) for f in os.listdir(opt['target_dir'])
+# ------------------------
+# Dataset for Full GT Images
+# ------------------------
+class GroundTruthDataset(torch.utils.data.Dataset):
+    def __init__(self, img_dir):
+        self.img_paths = sorted([
+            os.path.join(img_dir, f) for f in os.listdir(img_dir)
             if f.endswith('.npy')
         ])
-        self.phase = opt.get('phase', 'val')
-        self.normalize = opt.get('normalize', True)
-        self.reshape_to_image = opt.get('reshape_to_image', True)
-
-    def __len__(self):
-        return len(self.file_list)
-
-    def normalize_data(self, tensor):
-        max_val = torch.max(torch.abs(tensor))
-        return tensor / max_val if max_val > 0 else tensor
 
     def __getitem__(self, idx):
-        file_path = self.file_list[idx]
-        arr = np.load(file_path).astype(np.float32)
-        tensor = torch.from_numpy(arr)  # expected shape: (128, T)
-
-        if self.normalize:
-            tensor = self.normalize_data(tensor)
-
-        if self.reshape_to_image:
-            if tensor.dim() == 2:
-                tensor = tensor.unsqueeze(0)
-            elif tensor.dim() == 3 and tensor.shape[0] == 1:
-                pass
-            else:
-                raise ValueError(f"Unexpected shape in reshape_to_image: {tensor.shape}")
-
+        img = np.load(self.img_paths[idx])
+        img = torch.from_numpy(img).float().unsqueeze(0)
         return {
-            'lq': tensor,
-            'gt': tensor,
-            'lq_path': [file_path]
+            'gt': img,
+            'name': os.path.splitext(os.path.basename(self.img_paths[idx]))[0]
         }
 
+    def __len__(self):
+        return len(self.img_paths)
 
-def save_matrix_heatmap(A, save_path, cmap='viridis'):
-    """
-    Save a heatmap of the compression matrix A.
+# ------------------------
+# Utilities
+# ------------------------
+def get_random_subset(dataset, num_samples=5, seed=42):
+    random.seed(seed)
+    indices = random.sample(range(len(dataset)), num_samples)
 
-    Parameters
-    ----------
-    A : ndarray
-        Compression matrix of shape (m, n)
-    save_path : str
-        Output path for PNG
-    cmap : str, optional
-        Matplotlib colormap name
-    """
-    plt.figure(figsize=(6, 5))
-    im = plt.imshow(A, aspect='auto', cmap=cmap)
-    plt.colorbar(im, shrink=0.8)
-    plt.title("Compression Matrix A")
-    plt.xlabel("Original Channels")
-    plt.ylabel("Compressed Channels")
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=300)
-    plt.close()
+    print(f"\nSelected {dataset.__class__.__name__} samples:")
+    for idx in indices:
+        sample = dataset[idx]
+        print(f" - {sample['name']}")
+    return Subset(dataset, indices)
 
+def load_model_from_yaml_and_ckpt(yaml_path, ckpt_path, compression_ratio, num_channels):
+    with open(yaml_path, 'r') as f:
+        opt = yaml.safe_load(f)
 
-def save_gray_tensor(img_tensor, save_path):
-    """
-    Save a single-channel tensor as a normalized grayscale image.
+    model_args = dict(opt['network_g'])
+    model_args.pop('type', None)
 
-    Parameters
-    ----------
-    img_tensor : torch.Tensor
-        Input tensor of shape (1, H, W) or (H, W)
-    save_path : str
-        Output path
-    """
-    img = img_tensor.squeeze(0)
-    min_val = img.min()
-    max_val = img.max()
-    if max_val > min_val:
-        img = (img - min_val) / (max_val - min_val)
-    else:
-        img = torch.zeros_like(img)
-    save_image(img.unsqueeze(0), save_path, normalize=False)
+    # Override values from CLI
+    model_args['compression_ratio'] = compression_ratio
+    model_args['num_input_channels'] = num_channels
 
+    model = NAFNet(**model_args)
 
-def load_model_from_opt(opt_path, ckpt_path):
-    """
-    Load a model and weights from YAML config and checkpoint.
+    state_dict = torch.load(ckpt_path, map_location='cpu')
+    model.load_state_dict(state_dict['params'] if 'params' in state_dict else state_dict, strict=True)
+    model.eval()
+    return model
 
-    Parameters
-    ----------
-    opt_path : str
-        Path to YAML config
-    ckpt_path : str
-        Path to .pth checkpoint
-
-    Returns
-    -------
-    model : BasicSR model object
-        Fully initialized and loaded model
-    opt : dict
-        Parsed configuration dictionary
-    """
-    opt = parse(opt_path, is_train=False)
-    opt['dist'] = False
-    opt['path']['pretrain_network_g'] = ckpt_path
-    model = create_model(opt)
-
-    # Print compression matrix stats if it exists
-    if hasattr(model.net_g, 'cs_matrix'):
-        A_weights = model.net_g.cs_matrix.A.detach().cpu().numpy()
-        print("Loaded compression matrix A stats:")
-        print(f" - Shape: {A_weights.shape}")
-        print(f" - Mean:  {A_weights.mean():.4f}")
-        print(f" - Std:   {A_weights.std():.4f}")
-
-    model.net_g.eval()
-    return model, opt
-
-
-def run_inference(model, dataloader, save_dir, opt, device='cuda'):
-    """
-    Run inference on a dataset and save compressed/intermediate outputs.
-
-    Parameters
-    ----------
-    model : BasicSR model object
-        Trained model with .net_g containing NAFNet
-    dataloader : DataLoader
-        Dataloader wrapping test dataset
-    save_dir : str
-        Output directory for saving results
-    opt : dict
-        Parsed YAML configuration
-    device : str, optional
-        Device for inference
-    """
+def run_and_save(model, dataloader, save_dir, tag='val', device='cuda', compression_ratio=1):
     os.makedirs(save_dir, exist_ok=True)
-    model.device = device
-    model.net_g = model.net_g.to(device)
+    model.to(device)
+    model.eval()
 
-    # Save compression matrix A once if available
-    if hasattr(model.net_g, 'cs_matrix'):
-        model.net_g.cs_matrix = model.net_g.cs_matrix.to(device)
-        A_matrix = model.net_g.cs_matrix.A.detach().cpu().numpy()
-        np.save(os.path.join(save_dir, "compression_matrix_A.npy"), A_matrix)
-        save_matrix_heatmap(A_matrix, os.path.join(save_dir, "compression_matrix_A.png"))
-
-    for i, batch in enumerate(tqdm(dataloader, desc="Running Inference")):
-        model.feed_data(batch, is_val=True)
-
-        # Extract and reshape input
-        x = batch['lq'].to(device)  # (1, 128, T)
-        while x.dim() > 3:
-            x = x.squeeze(0)
-        B, C, T = x.shape
-
-        # Apply compression and reconstruction
-        Ax, A = model.net_g.cs_matrix(x)  # (1, m, T), (m, n)
-        A_pinv = torch.linalg.pinv(A)     # (n, m)
-        x_recon = torch.matmul(A_pinv.unsqueeze(0), Ax)  # (1, n, T)
-
-        # Reshape for NAFNet input
-        x_recon = x_recon.unsqueeze(1)  # (1, 1, 128, T)
+    for i, batch in enumerate(tqdm(dataloader, desc=f"Processing {tag} samples")):
+        time.sleep(0.2)
+        gt_img = batch['gt'].to(device)
+        name = batch['name']
+        name = name if isinstance(name, str) else name[0]
 
         with torch.no_grad():
-            output = model.net_g(x_recon)
+            B, C, H, W = gt_img.shape
 
-        # Detach all tensors to CPU for saving
-        output = output.detach().cpu()
-        x = x.detach().cpu()
-        Ax = Ax.squeeze(0).detach().cpu()
-        x_recon = x_recon.detach().cpu()
-        gt_img = batch['gt'].cpu()
+            # Flatten image spatial dims → (B, C, T)
+            x_unrolled = gt_img
 
-        # Extract filename
-        img_path = batch['lq_path']
-        while isinstance(img_path, (list, tuple)):
-            img_path = img_path[0]
-        base_name = os.path.splitext(os.path.basename(img_path))[0]
+            # Apply compression and reconstruct: x_recon has shape (B, 128, H*W)
+            x_recon, A, Ax = model.apply_compression(x_unrolled)
 
-        # --- Compute and print MSE between x_recon and x ---
-        mse_val = torch.mean((x_recon.squeeze(0) - x.squeeze(0)) ** 2).item()
-        print(f"[{base_name}] MSE (recon vs GT): {mse_val:.6f}")
+            # Feed reconstructed input into model
+            output = model(x_recon.unsqueeze(1))  # Add channel dim: (B, 1, C, T)
+        
+        # Squeeze output to match gt_img shape
+        output = output.squeeze(1)  # (B, C, H, W)
+        x_recon = x_recon.squeeze(1)  # (B, C, T)
+        gt_img = gt_img.squeeze()  # (B, C, T)
+        Ax = Ax.squeeze(1)  # (B, m, T)
+        # Save PNGs
 
-        # Save numpy arrays
-        np.save(os.path.join(save_dir, f"{base_name}_x.npy"), x.squeeze(0).numpy())
-        np.save(os.path.join(save_dir, f"{base_name}_Ax.npy"), Ax.numpy())
-        np.save(os.path.join(save_dir, f"{base_name}_xrecon.npy"), x_recon.squeeze(0).numpy())
-        np.save(os.path.join(save_dir, f"{base_name}_output.npy"), output.squeeze(0).numpy())
+        save_image(gt_img, os.path.join(save_dir, f'{name}_gt.png'), normalize=True)
+        save_image(x_recon, os.path.join(save_dir, f'{name}_input.png'), normalize=True)
+        save_image(output, os.path.join(save_dir, f'{name}_output.png'), normalize=True)
+        save_image(A, os.path.join(save_dir, f'{name}_A.png'), normalize=True)
+        save_image(Ax, os.path.join(save_dir, f'{name}_Ax.png'), normalize=True)
 
-        # Save grayscale PNGs
-        save_gray_tensor(x, os.path.join(save_dir, f"{base_name}_x.png"))
-        save_gray_tensor(x_recon, os.path.join(save_dir, f"{base_name}_xrecon.png"))
-        save_gray_tensor(output, os.path.join(save_dir, f"{base_name}_output.png"))
+        # Optional: Save .npy if needed
+        np.save(os.path.join(save_dir, f'{name}_gt.npy'), gt_img.cpu().numpy())
+        np.save(os.path.join(save_dir, f'{name}_input.npy'), x_recon.cpu().numpy())
+        np.save(os.path.join(save_dir, f'{name}_output.npy'), output.cpu().numpy())
 
+def evaluate_checkpoints(ckpt_files, ckpt_dir, dataloaders, result_root, device, compression_ratio, num_channels):
+    for ckpt_file in ckpt_files:
+        iter_num = re.findall(r'\d+', ckpt_file)[0]
+        ckpt_path = os.path.join(ckpt_dir, ckpt_file)
+        print(f"\nLoading checkpoint: {ckpt_path}")
 
+        model = load_model_from_yaml_and_ckpt(CONFIG_PATH, ckpt_path, compression_ratio, num_channels)
+
+        tag = f'iter_{iter_num}'
+        for phase, loader in dataloaders.items():
+            out_dir = os.path.join(result_root, tag, phase)
+            print(f"Saving to: {out_dir}")
+            run_and_save(model, loader, out_dir, tag=phase, device=device, compression_ratio=compression_ratio)
+
+# ------------------------
+# Main Logic
+# ------------------------
 def main():
-    """
-    Command-line interface for running inference.
-    """
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--opt', type=str, required=True, help='Path to test .yml config file')
-    parser.add_argument('--ckpt', type=str, required=True, help='Path to model checkpoint .pth')
-    parser.add_argument('--input_dir', type=str, required=True, help='Folder of input .npy files')
-    parser.add_argument('--output_dir', type=str, required=True, help='Where to save results')
-    parser.add_argument('--device', type=str, default='cuda', help='Device to use')
-    args = parser.parse_args()
+    args = parse_args()
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    print(f"\nLoading model from: {args.ckpt}")
-    model, opt = load_model_from_opt(args.opt, args.ckpt)
+    train_dir = os.path.join(args.data_root, 'data_split/train')
+    val_dir = os.path.join(args.data_root, 'data_split/val')
 
-    print(f"Loading test data from: {args.input_dir}")
-    dataset_opt = {
-        'target_dir': args.input_dir,
-        'phase': 'val'
-    }
-    test_set = CompressedNpyDataset(dataset_opt)
-    dataloader = DataLoader(test_set, batch_size=1, shuffle=False, num_workers=0)
+    train_set = GroundTruthDataset(train_dir)
+    val_set = GroundTruthDataset(val_dir)
 
-    print(f"Running inference and saving to: {args.output_dir}")
-    run_inference(model, dataloader, args.output_dir, opt, device=args.device)
+    train_subset = get_random_subset(train_set, seed=42)
+    val_subset = get_random_subset(val_set, seed=42)
 
+    train_loader = DataLoader(train_subset, batch_size=1, shuffle=False, num_workers=0)
+    val_loader = DataLoader(val_subset, batch_size=1, shuffle=False, num_workers=0)
+
+    ckpt_dir = os.path.join(args.model_root, 'models')
+    ckpt_files = sorted(
+        [f for f in os.listdir(ckpt_dir) if re.match(r'net_g_\d+\.pth', f)],
+        key=lambda x: int(re.findall(r'\d+', x)[0])
+    )
+
+    evaluate_checkpoints(
+        ckpt_files=ckpt_files,
+        ckpt_dir=ckpt_dir,
+        dataloaders={'train': train_loader, 'val': val_loader},
+        result_root=args.results_root,
+        device=device,
+        compression_ratio=args.compression_ratio,
+        num_channels=args.num_channels
+    )
 
 if __name__ == '__main__':
     main()

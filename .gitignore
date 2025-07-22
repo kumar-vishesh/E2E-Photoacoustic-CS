@@ -11,3 +11,4 @@ debug_pairs/
 tb_logger/
 gifs/
 *.log
+tmp/
