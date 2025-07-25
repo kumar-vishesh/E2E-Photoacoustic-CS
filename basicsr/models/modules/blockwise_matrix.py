@@ -25,7 +25,7 @@ class BlockLearnableCompressionMatrix(nn.Module):
 
         # Create each block as its own nn.Parameter
         for i in range(self.m):
-            block = torch.randn(c) * noise_std  # shape (c,)
+            block = 5 * torch.ones(c) + torch.randn(c) * noise_std  # shape (c,)
             param = nn.Parameter(block)
             setattr(self, f'block{i+1}', param)  # block1, block2, ..., blockm
 
@@ -33,14 +33,15 @@ class BlockLearnableCompressionMatrix(nn.Module):
     def A(self) -> torch.Tensor:
         """
         Returns the full (m × n) compression matrix A, where each row `i`
-        has its learned `c` values (from block{i+1}) inserted in columns `[i * c : (i + 1) * c]`.
+        has its learned `c` values (from block{i+1}) inserted in columns `[i * c : (i + 1) * c]`,
+        with values constrained to [-1, 1] using tanh.
         """
-
-        # Gather all blocks and stack into a list of (1, c) tensors
-        blocks = [getattr(self, f'block{i+1}').unsqueeze(0) for i in range(self.m)]
+        # Gather all blocks, apply tanh, and stack into a list of (1, c) tensors
+        blocks = [torch.tanh(getattr(self, f'block{i+1}').unsqueeze(0)) for i in range(self.m)]
         A_full = torch.block_diag(*blocks)  # shape (m, n)
 
         return A_full.to(blocks[0].device, blocks[0].dtype)
+
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """

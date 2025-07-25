@@ -2,7 +2,7 @@
 # Custom NAFNet Config for On-the-Fly Compressed Synthetic Dataset
 # ------------------------------------------------------------------------
 
-name: Block_Diag_Noisy_Learnable_CS_Matrix_12x
+name: Tanh_Blocksum_Init_Learnable_CS_Matrix_8x
 model_type: ImageRestorationModel
 scale: 1
 num_gpu: 1
@@ -12,7 +12,7 @@ datasets:
   train:
     name: synthetic-train
     type: UncompressedNpyDataset
-    target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/25x_Averaged/Padded/data_split/train
+    target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/25x_Averaged/Original/data_split/train
     upsample_type: pinv
     normalize: true
     noise_std: 0.01
@@ -26,7 +26,7 @@ datasets:
   val:
     name: synthetic-val
     type: UncompressedNpyDataset
-    target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/25x_Averaged/Padded/data_split/val
+    target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/25x_Averaged/Original/data_split/val
     upsample_type: pinv
     normalize: true
     noise_std: 0.01
@@ -43,8 +43,8 @@ network_g:
   enc_blk_nums: [1, 1, 1, 28]
   middle_blk_num: 1
   dec_blk_nums: [1, 1, 1, 1]
-  num_input_channels: 132
-  compression_ratio: 12
+  num_input_channels: 128
+  compression_ratio: 8
 
 path:
   root: /home/vk38/E2E-Photoacoustic-CS/
