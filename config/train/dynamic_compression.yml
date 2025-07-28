@@ -2,7 +2,7 @@
 # Custom NAFNet Config for On-the-Fly Compressed Synthetic Dataset
 # ------------------------------------------------------------------------
 
-name: Tanh_Blocksum_Init_Learnable_CS_Matrix_8x
+name: CNN_Upsampler_Learnable_CS_Matrix_8x
 model_type: ImageRestorationModel
 scale: 1
 num_gpu: 1

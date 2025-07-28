@@ -20,6 +20,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from basicsr.models.archs.arch_util import LayerNorm2d
 from basicsr.models.archs.local_arch import Local_Base
+from basicsr.models.modules.Learned_Upsampler import Learned_Upsampler
 
 class SimpleGate(nn.Module):
     def forward(self, x):
@@ -94,6 +95,7 @@ class NAFNet(nn.Module):
         if compression_ratio is not None and num_input_channels is not None:
             self.use_compression = True
             self.cs_matrix = BlockLearnableCompressionMatrix(c=compression_ratio, n=num_input_channels)
+            self.upsampler = Learned_Upsampler(compression_ratio)
         else:
             self.use_compression = False
 
@@ -175,30 +177,17 @@ class NAFNet(nn.Module):
 
     def apply_compression(self, x):
         """
-        Apply the learnable compression matrix A to reduce channel dimensionality.
-
-        Parameters
-        ----------
-        x : torch.Tensor
-            Input tensor of shape (B, 1, C, T) or (B, C, T), where:
-            - B is the batch size
-            - C is the number of input channels (e.g., transducers)
-            - T is the number of time steps
-
-        Returns
-        -------
-        x_recon : torch.Tensor
-            Reconstructed input from compressed form, of shape (B, C, T)
-        A : torch.Tensor
-            The learned compression matrix of shape (m, C)
-        Ax : torch.Tensor
-            Compressed signal of shape (B, m, T), where m = C // compression_ratio
+        Apply the learnable compression matrix A and reconstruct using the learned upsampler.
         """
         if not self.use_compression:
             raise RuntimeError("Compression matrix was not initialized in NAFNet.")
         Ax, A = self.cs_matrix(x)
-        A_pinv = torch.linalg.pinv(A)
-        x_recon = torch.matmul(A_pinv.unsqueeze(0), Ax)
+        # Ax shape: (B, m, T)
+        # Add channel dimension for upsampler: (B, 1, m, T)
+        Ax_reshaped = Ax.unsqueeze(1)
+        x_recon = self.upsampler(Ax_reshaped)
+        # Remove channel dimension if needed: (B, 1, C, T) -> (B, C, T)
+        x_recon = x_recon.squeeze(1)
         return x_recon, A, Ax
 
 
