@@ -1,6 +1,8 @@
 # ------------------------------------------------------------------------
 # Copyright (c) 2022 megvii-model. All Rights Reserved.
 # ------------------------------------------------------------------------
+# Modified by: VK (2025)
+# ------------------------------------------------------------------------
 
 '''
 Simple Baselines for Image Restoration
@@ -18,6 +20,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from basicsr.models.archs.arch_util import LayerNorm2d
 from basicsr.models.archs.local_arch import Local_Base
+from basicsr.models.modules.Learned_Upsampler import Learned_Upsampler
 
 class SimpleGate(nn.Module):
     def forward(self, x):
@@ -82,8 +85,19 @@ class NAFBlock(nn.Module):
 
 class NAFNet(nn.Module):
 
-    def __init__(self, img_channel=3, width=16, middle_blk_num=1, enc_blk_nums=[], dec_blk_nums=[]):
+    def __init__(self, img_channel=3, width=16, middle_blk_num=1, enc_blk_nums=[], dec_blk_nums=[],
+             compression_ratio=None, num_input_channels=None):
+
         super().__init__()
+        
+        # Initialize compression matrix if config provides it
+        from basicsr.models.modules.blockwise_matrix import BlockLearnableCompressionMatrix
+        if compression_ratio is not None and num_input_channels is not None:
+            self.use_compression = True
+            self.cs_matrix = BlockLearnableCompressionMatrix(c=compression_ratio, n=num_input_channels)
+            self.upsampler = Learned_Upsampler(compression_ratio)
+        else:
+            self.use_compression = False
 
         self.intro = nn.Conv2d(in_channels=img_channel, out_channels=width, kernel_size=3, padding=1, stride=1, groups=1,
                               bias=True)
@@ -160,6 +174,22 @@ class NAFNet(nn.Module):
         mod_pad_w = (self.padder_size - w % self.padder_size) % self.padder_size
         x = F.pad(x, (0, mod_pad_w, 0, mod_pad_h))
         return x
+
+    def apply_compression(self, x):
+        """
+        Apply the learnable compression matrix A and reconstruct using the learned upsampler.
+        """
+        if not self.use_compression:
+            raise RuntimeError("Compression matrix was not initialized in NAFNet.")
+        Ax, A = self.cs_matrix(x)
+        # Ax shape: (B, m, T)
+        # Add channel dimension for upsampler: (B, 1, m, T)
+        Ax_reshaped = Ax.unsqueeze(1)
+        x_recon = self.upsampler(Ax_reshaped)
+        # Remove channel dimension if needed: (B, 1, C, T) -> (B, C, T)
+        x_recon = x_recon.squeeze(1)
+        return x_recon, A, Ax
+
 
 class NAFNetLocal(Local_Base, NAFNet):
     def __init__(self, *args, train_size=(1, 3, 256, 256), fast_imp=False, **kwargs):

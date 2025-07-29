@@ -2,7 +2,7 @@
 # Custom NAFNet Config for On-the-Fly Compressed Synthetic Dataset
 # ------------------------------------------------------------------------
 
-name: CNN_Upsampler_Learnable_CS_Matrix_8x
+name: NAFBlock_Learnable_CS_Matrix_8x
 model_type: ImageRestorationModel
 scale: 1
 num_gpu: 1
@@ -22,6 +22,8 @@ datasets:
     use_shuffle: true
     phase: train
     pin_memory: true
+    save_debug_data: true
+    
 
   val:
     name: synthetic-val
@@ -35,6 +37,7 @@ datasets:
     batch_size_per_gpu: 8
     use_shuffle: false
     phase: val
+    save_debug_data: true
 
 network_g:
   type: NAFNet
@@ -63,7 +66,7 @@ train:
 
   scheduler:
     type: TrueCosineAnnealingLR
-    T_max: 100000
+    T_max: 200000
     eta_min: !!float 1e-7
 
   total_iter: 100000

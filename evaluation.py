@@ -23,20 +23,23 @@ torch.set_num_interop_threads(1)
 # ------------------------
 # Custom Imports
 # ------------------------
-from basicsr.models.archs.NAFNet_arch import NAFNet
+from basicsr.models.archs.NAFNet_CS import NAFNet
 
 # ------------------------
 # Config Path
 # ------------------------
-CONFIG_PATH = '/home/vk38/E2E-Photoacoustic-CS/config/test/temp.yml'
+CONFIG_PATH = '/home/vk38/Photoacoustics/NAFNet/options/test/CUSTOM/nafnet_onthefly.yml' \
+#'/home/vk38/E2E-Photoacoustic-CS/config/test/temp.yml'
 
 # ------------------------
 # Argument Parsing
 # ------------------------
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_root', type=str, required=True,
+    parser.add_argument('--data_root', type=str, required=False,
                         help='Path to data root containing data_split/train and val')
+    parser.add_argument('--experimental_path', type=str, default=None,
+                        help='Path to folder containing experimental .npy files to process')
     parser.add_argument('--model_root', type=str, required=True,
                         help='Path to experiment dir containing "models" subfolder')
     parser.add_argument('--results_root', type=str, required=True,
@@ -88,7 +91,6 @@ def load_model_from_yaml_and_ckpt(yaml_path, ckpt_path, compression_ratio, num_c
     model_args = dict(opt['network_g'])
     model_args.pop('type', None)
 
-    # Override values from CLI
     model_args['compression_ratio'] = compression_ratio
     model_args['num_input_channels'] = num_channels
 
@@ -112,22 +114,14 @@ def run_and_save(model, dataloader, save_dir, tag='val', device='cuda', compress
 
         with torch.no_grad():
             B, C, H, W = gt_img.shape
-
-            # Flatten image spatial dims → (B, C, T)
             x_unrolled = gt_img
-
-            # Apply compression and reconstruct: x_recon has shape (B, 128, H*W)
             x_recon, A, Ax = model.apply_compression(x_unrolled)
+            output = model(x_recon.unsqueeze(1))  # (B, 1, C, T)
 
-            # Feed reconstructed input into model
-            output = model(x_recon.unsqueeze(1))  # Add channel dim: (B, 1, C, T)
-        
-        # Squeeze output to match gt_img shape
-        output = output.squeeze(1)  # (B, C, H, W)
-        x_recon = x_recon.squeeze(1)  # (B, C, T)
-        gt_img = gt_img.squeeze()  # (B, C, T)
-        Ax = Ax.squeeze(1)  # (B, m, T)
-        # Save PNGs
+        output = output.squeeze(1)
+        x_recon = x_recon.squeeze(1)
+        gt_img = gt_img.squeeze()
+        Ax = Ax.squeeze(1)
 
         save_image(gt_img, os.path.join(save_dir, f'{name}_gt.png'), normalize=True)
         save_image(x_recon, os.path.join(save_dir, f'{name}_input.png'), normalize=True)
@@ -135,7 +129,6 @@ def run_and_save(model, dataloader, save_dir, tag='val', device='cuda', compress
         save_image(A, os.path.join(save_dir, f'{name}_A.png'), normalize=True)
         save_image(Ax, os.path.join(save_dir, f'{name}_Ax.png'), normalize=True)
 
-        # Optional: Save .npy if needed
         np.save(os.path.join(save_dir, f'{name}_gt.npy'), gt_img.cpu().numpy())
         np.save(os.path.join(save_dir, f'{name}_input.npy'), x_recon.cpu().numpy())
         np.save(os.path.join(save_dir, f'{name}_output.npy'), output.cpu().numpy())
@@ -160,6 +153,52 @@ def evaluate_checkpoints(ckpt_files, ckpt_dir, dataloaders, result_root, device,
 def main():
     args = parse_args()
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    # ------------------------
+    # If Experimental Mode
+    # ------------------------
+    if args.experimental_path:
+        class ExperimentalDataset(torch.utils.data.Dataset):
+            def __init__(self, folder_path):
+                self.img_paths = sorted([
+                    os.path.join(folder_path, f) for f in os.listdir(folder_path)
+                    if f.endswith('.npy')
+                ])
+
+            def __getitem__(self, idx):
+                img = np.load(self.img_paths[idx])
+                img = torch.from_numpy(img).float().unsqueeze(0)
+                name = os.path.splitext(os.path.basename(self.img_paths[idx]))[0]
+                return {'gt': img, 'name': name}
+
+            def __len__(self):
+                return len(self.img_paths)
+
+        experimental_dataset = ExperimentalDataset(args.experimental_path)
+        experimental_loader = DataLoader(experimental_dataset, batch_size=1, shuffle=False, num_workers=0)
+
+        ckpt_dir = os.path.join(args.model_root, 'models')
+        ckpt_files = sorted(
+            [f for f in os.listdir(ckpt_dir) if re.match(r'net_g_\d+\.pth', f)],
+            key=lambda x: int(re.findall(r'\d+', x)[0])
+        )
+
+        evaluate_checkpoints(
+            ckpt_files=ckpt_files,
+            ckpt_dir=ckpt_dir,
+            dataloaders={'experimental': experimental_loader},
+            result_root=args.results_root,
+            device=device,
+            compression_ratio=args.compression_ratio,
+            num_channels=args.num_channels
+        )
+        return  # Skip standard train/val logic
+
+    # ------------------------
+    # Default: Train/Val Mode
+    # ------------------------
+    if not args.data_root:
+        raise ValueError("Either --data_root or --experimental_path must be provided.")
 
     train_dir = os.path.join(args.data_root, 'data_split/train')
     val_dir = os.path.join(args.data_root, 'data_split/val')
