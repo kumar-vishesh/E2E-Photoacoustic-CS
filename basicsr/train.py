@@ -8,26 +8,6 @@
 # ------------------------------------------------------------------------
 
 import os
-
-def limit_cpu_threads(num_threads=1):
-    """Limit CPU threads for stable multi-process training."""
-    import os
-    os.environ['OMP_NUM_THREADS'] = str(num_threads)
-    os.environ['MKL_NUM_THREADS'] = str(num_threads)
-    os.environ['OPENBLAS_NUM_THREADS'] = str(num_threads)
-    os.environ['NUMEXPR_NUM_THREADS'] = str(num_threads)
-
-    import torch
-    torch.set_num_threads(num_threads)
-
-    try:
-        import cv2
-        cv2.setNumThreads(num_threads)
-    except ImportError:
-        pass
-
-limit_cpu_threads(1)
-
 import argparse
 import datetime
 import logging
@@ -48,6 +28,18 @@ from basicsr.utils import (MessageLogger, check_resume, get_env_info,
 from basicsr.utils.dist_util import get_dist_info, init_dist
 from basicsr.utils.options import dict2str, parse
 
+def limit_cpu_threads(num_threads=1):
+    """Limit CPU threads for stable multi-process training."""
+    os.environ['OMP_NUM_THREADS'] = str(num_threads)
+    os.environ['MKL_NUM_THREADS'] = str(num_threads)
+    os.environ['OPENBLAS_NUM_THREADS'] = str(num_threads)
+    os.environ['NUMEXPR_NUM_THREADS'] = str(num_threads)
+
+    try:
+        import cv2
+        cv2.setNumThreads(num_threads)
+    except ImportError:
+        pass
 
 def parse_options(is_train=True):
     parser = argparse.ArgumentParser()
@@ -351,6 +343,8 @@ def main():
 
 
 if __name__ == '__main__':
-    import os
+    limit_cpu_threads(1)
+
+    # Set environment variables for distributed training
     os.environ['GRPC_POLL_STRATEGY']='epoll1'
     main()

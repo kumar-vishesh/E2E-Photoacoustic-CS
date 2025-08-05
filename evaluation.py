@@ -23,12 +23,12 @@ torch.set_num_interop_threads(1)
 # ------------------------
 # Custom Imports
 # ------------------------
-from basicsr.models.archs.NAFNet_CS import NAFNet
+from basicsr.models.archs.NAFNet_arch import NAFNet
 
 # ------------------------
 # Config Path
 # ------------------------
-CONFIG_PATH = '/home/vk38/Photoacoustics/NAFNet/options/test/CUSTOM/nafnet_onthefly.yml' \
+CONFIG_PATH = '/home/vk38/Photoacoustics/NAFNet/options/test/CUSTOM/nafnet_onthefly.yml'
 #'/home/vk38/E2E-Photoacoustic-CS/config/test/temp.yml'
 
 # ------------------------
@@ -40,7 +40,7 @@ def parse_args():
                         help='Path to data root containing data_split/train and val')
     parser.add_argument('--experimental_path', type=str, default=None,
                         help='Path to folder containing experimental .npy files to process')
-    parser.add_argument('--model_root', type=str, required=True,
+    parser.add_argument('--model_root', type=str, required=False,
                         help='Path to experiment dir containing "models" subfolder')
     parser.add_argument('--results_root', type=str, required=True,
                         help='Output directory for saving PNGs')
@@ -48,6 +48,9 @@ def parse_args():
                         help='Compression ratio used during training (e.g. 4, 8, 16)')
     parser.add_argument('--num_channels', type=int, required=True,
                         help='Number of input channels (typically 128)')
+    parser.add_argument('--ckpt_path', type=str, required=False,
+                    help='Path to a specific model checkpoint (.pth). If provided, only this model will be evaluated.')
+
     return parser.parse_args()
 
 # ------------------------
@@ -152,6 +155,9 @@ def evaluate_checkpoints(ckpt_files, ckpt_dir, dataloaders, result_root, device,
 # ------------------------
 def main():
     args = parse_args()
+    if (args.ckpt_path and args.model_root) or (not args.ckpt_path and not args.model_root):
+        raise ValueError("You must provide either --ckpt_path or --model_root, but not both.")
+
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     # ------------------------
@@ -177,11 +183,16 @@ def main():
         experimental_dataset = ExperimentalDataset(args.experimental_path)
         experimental_loader = DataLoader(experimental_dataset, batch_size=1, shuffle=False, num_workers=0)
 
-        ckpt_dir = os.path.join(args.model_root, 'models')
-        ckpt_files = sorted(
-            [f for f in os.listdir(ckpt_dir) if re.match(r'net_g_\d+\.pth', f)],
-            key=lambda x: int(re.findall(r'\d+', x)[0])
-        )
+        if args.ckpt_path:
+            ckpt_files = [os.path.basename(args.ckpt_path)]
+            ckpt_dir = os.path.dirname(args.ckpt_path)
+        else:
+            ckpt_dir = os.path.join(args.model_root, 'models')
+            ckpt_files = sorted(
+                [f for f in os.listdir(ckpt_dir) if re.match(r'net_g_\d+\.pth', f)],
+                key=lambda x: int(re.findall(r'\d+', x)[0])
+            )
+
 
         evaluate_checkpoints(
             ckpt_files=ckpt_files,
