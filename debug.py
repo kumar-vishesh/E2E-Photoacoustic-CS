@@ -1,112 +1,102 @@
 import os
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import numpy as np
-import matplotlib.pyplot as plt
-from tqdm import tqdm
-from torch.utils.data import DataLoader, Dataset
-from basicsr.models.modules.blockwise_matrix import BlockLearnableCompressionMatrix
-from PIL import Image
+import argparse
+import torch.nn.functional as F
 
-# ------------------------ Configuration ------------------------
-DATA_ROOT = '/home/vk38/E2E-Photoacoustic-CS/datasets/25x_Averaged/Original/data_split/train'
-NUM_EPOCHS = 300
-BATCH_SIZE = 8
-LR = 1e-4
-COMPRESSION_RATIO = 8
-NUM_CHANNELS = 128
-DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-NOISE_STD = 1.0
-GIF_OUTPUT_PATH = 'tmp/block_sim_hist.gif'
+from basicsr.data import create_dataset, create_dataloader
+from basicsr.models import create_model
+from basicsr.utils.options import parse
 
-# ------------------------ Dataset Loader ------------------------
-class FullPADataset(Dataset):
-    def __init__(self, root_dir):
-        self.img_paths = sorted([
-            os.path.join(root_dir, f) for f in os.listdir(root_dir)
-            if f.endswith('.npy')
-        ])
 
-    def __len__(self):
-        return len(self.img_paths)
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--data_path', required=True, help='Folder with .npy ground truth files')
+    parser.add_argument('--ckpt_path', required=True, help='Path to model checkpoint (.pth)')
+    parser.add_argument('--yaml_path', required=True, help='Path to model config (.yml)')
+    parser.add_argument('--compression_ratio', type=int, required=True)
+    parser.add_argument('--num_channels', type=int, required=True)
+    parser.add_argument('--device', default='cuda', help='cuda or cpu')
+    return parser.parse_args()
 
-    def __getitem__(self, idx):
-        x = np.load(self.img_paths[idx])  # shape (C, T)
-        x = torch.from_numpy(x).float()
-        return x
+def compute_mse(model, dataloader, device='cuda'):
+    model.net_g.to(device)
+    model.net_g.eval()
 
-train_dataset = FullPADataset(DATA_ROOT)
-train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True)
+    total_mse = 0.0
+    total_pixels = 0
 
-# ------------------------ Compression Module ------------------------
-A_module = BlockLearnableCompressionMatrix(
-    c=COMPRESSION_RATIO,
-    n=NUM_CHANNELS,
-    noise_std=NOISE_STD
-).to(DEVICE)
-
-optimizer = torch.optim.Adam(A_module.parameters(), lr=LR)
-loss_fn = nn.MSELoss()
-
-# ------------------------ Training Loop ------------------------
-all_sims = []
-hist_images = []
-
-for epoch in range(NUM_EPOCHS):
-    total_loss = 0.0
-    A_module.train()
-
-    for batch in tqdm(train_loader, desc=f"Epoch {epoch+1}/{NUM_EPOCHS}"):
-        x = batch.to(DEVICE)  # (B, C, T)
-        Ax, A = A_module(x)
-        A_pinv = torch.linalg.pinv(A)
-        x_recon = torch.matmul(A_pinv.unsqueeze(0), Ax)
-
-        loss = loss_fn(x_recon, x)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        total_loss += loss.item() * x.size(0)
-
-    avg_loss = total_loss / len(train_loader.dataset)
-
-    # ------------------ Block Similarity Diagnostic ------------------
     with torch.no_grad():
-        blocks = [getattr(A_module, f'block{i+1}').detach().cpu() for i in range(A_module.m)]
-        sims = [
-            F.cosine_similarity(b1, b2, dim=0).item()
-            for i, b1 in enumerate(blocks)
-            for j, b2 in enumerate(blocks) if i < j
-        ]
-        all_sims.append(sims)
+        for data in dataloader:
+            lq = data['lq'].to(device)  # Noisy input
+            gt = data['gt'].to(device)  # Clean ground truth
 
-        # Plot and save histogram frame
-        plt.figure(figsize=(6, 4))
-        plt.hist(sims, bins=20, edgecolor='black')
-        plt.title(f'Block Cosine Similarity - Epoch {epoch+1}')
-        plt.xlabel('Cosine Similarity')
-        plt.ylabel('Frequency')
-        frame_path = f'tmp/sim_hist_epoch_{epoch+1:03d}.png'
-        plt.savefig(frame_path, dpi=150, bbox_inches='tight')
-        plt.close()
+            # Apply model compression to the noisy input
+            x_recon, A, Ax = model.net_g.apply_compression(lq)
+            output = model.net_g(x_recon.unsqueeze(1))
 
-        # Load with PIL instead of imageio
-        hist_images.append(Image.open(frame_path).convert('RGB'))
+            mse = F.mse_loss(output, gt, reduction='sum').item()
+            total_mse += mse
+            total_pixels += gt.numel()
 
-    print(f"[Epoch {epoch+1:03d}] Loss: {avg_loss:.6f} | Block sim (mean/min/max): {np.mean(sims):.4f} / {np.min(sims):.4f} / {np.max(sims):.4f}")
+    mean_mse = total_mse / total_pixels
+    return mean_mse
 
-# Convert to RGB and ensure consistent sizing
-hist_images_pil = hist_images
 
-# Save animated GIF using PIL
-if hist_images_pil:
-    hist_images_pil[0].save(
-        GIF_OUTPUT_PATH,
-        save_all=True,
-        append_images=hist_images_pil[1:],
-        duration=100,  # ms per frame = 1 fps
-        loop=0
+
+def main():
+    args = parse_args()
+
+    # Load and patch YAML options
+    opt = parse(args.yaml_path, is_train=False)
+    opt['dist'] = False
+    opt['rank'] = 0
+
+    # Override model parameters
+    opt['network_g']['compression_ratio'] = args.compression_ratio
+    opt['network_g']['num_input_channels'] = args.num_channels
+
+    # Override pretrain path
+    opt['path']['pretrain_network_g'] = args.ckpt_path
+    opt['path']['strict_load_g'] = True
+
+    # Override dataset path dynamically
+    opt['datasets'] = {
+
+    'val': {
+            'name': 'eval_npy',
+            'type': 'UncompressedNpyDataset',
+            'target_dir': args.data_path,
+            'noise_std': 0.01,
+            'normalize': True,
+            'reshape_to_image': True,
+            'upsample_type': 'pinv',
+            'io_backend': {'type': 'disk'},
+            'batch_size_per_gpu': 1,
+            'num_worker_per_gpu': 1,
+            'use_shuffle': False,
+            'phase': 'val',
+            'save_debug_pairs': True
+        }
+    }
+
+    # Create dataset and dataloader via BasicSR factory
+    val_dataset = create_dataset(opt['datasets']['val'])
+    val_loader = create_dataloader(
+        val_dataset,
+        opt['datasets']['val'],
+        num_gpu=1,
+        dist=False,
+        sampler=None
     )
-    print(f"GIF saved to: {GIF_OUTPUT_PATH}")
+
+    # Create model using BasicSR
+    model = create_model(opt)
+
+    # Evaluate MSE
+    mse = compute_mse(model, val_loader, device=args.device)
+    print(f"\nMean Pixelwise MSE: {mse:.6e}")
+
+
+if __name__ == '__main__':
+    main()

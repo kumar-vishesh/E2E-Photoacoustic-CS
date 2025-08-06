@@ -23,7 +23,7 @@ torch.set_num_interop_threads(1)
 # ------------------------
 # Custom Imports
 # ------------------------
-from basicsr.models.archs.NAFNet_arch import NAFNet
+from basicsr.models.archs.CS_arch import CS_NAFNet
 
 # ------------------------
 # Config Path
@@ -97,7 +97,7 @@ def load_model_from_yaml_and_ckpt(yaml_path, ckpt_path, compression_ratio, num_c
     model_args['compression_ratio'] = compression_ratio
     model_args['num_input_channels'] = num_channels
 
-    model = NAFNet(**model_args)
+    model = CS_NAFNet(**model_args)
 
     state_dict = torch.load(ckpt_path, map_location='cpu')
     model.load_state_dict(state_dict['params'] if 'params' in state_dict else state_dict, strict=True)

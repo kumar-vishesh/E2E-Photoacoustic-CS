@@ -20,7 +20,7 @@ datasets:
     pin_memory: true
 
 network_g:
-  type: NAFNet
+  type: CS_NAFNet
   img_channel: 1
   width: 32
   enc_blk_nums: [1, 1, 1, 28]
