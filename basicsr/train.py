@@ -27,6 +27,9 @@ from basicsr.utils import (MessageLogger, check_resume, get_env_info,
                            set_random_seed)
 from basicsr.utils.dist_util import get_dist_info, init_dist
 from basicsr.utils.options import dict2str, parse
+from copy import deepcopy
+from multiprocessing import Process, Queue
+
 
 def limit_cpu_threads(num_threads=1):
     """Limit CPU threads for stable multi-process training."""
@@ -153,10 +156,67 @@ def create_train_val_dataloader(opt, logger):
             logger.info(
                 f'Number of val images/folders in {dataset_opt["name"]}: '
                 f'{len(val_set)}')
+        elif phase == 'test':
+            test_set = create_dataset(dataset_opt)
+            test_loader = create_dataloader(
+                test_set,
+                dataset_opt,
+                num_gpu=opt['num_gpu'],
+                dist=opt['dist'],
+                sampler=None,
+                seed=opt['manual_seed'])
+            logger.info(
+                f'Number of test images/folders in {dataset_opt["name"]}: '
+                f'{len(test_set)}')
         else:
             raise ValueError(f'Dataset phase {phase} is not recognized.')
 
-    return train_loader, train_sampler, val_loader, total_epochs, total_iters
+    return train_loader, train_sampler, val_loader, test_loader, total_epochs, total_iters
+
+def save_entire_data_set(model, data_loader, epoch, save_root, rgb2bgr=True, name_prefix='none'):
+    """Save the entire dataset predictions for the best model.
+    Args:
+        model (basicsr.models.Model): The model to use for inference.
+        data_loader (torch.utils.data.DataLoader): The dataloader for the dataset.
+        epoch (int): The current epoch number.
+        save_root (str): The root directory to save the predictions.
+        rgb2bgr (bool): Whether to convert RGB to BGR.
+        name_prefix (str): Prefix for the saved images.
+    """
+    from basicsr.utils.img_util import tensor2img, imwrite
+
+    logger = get_root_logger()
+    logger.info(f'[Best Model] Saving entire {name_prefix} dataset for epoch {epoch}...')
+
+    model.net_g.eval()
+    save_dir = osp.join(save_root, f'best_model_epoch_{epoch}', name_prefix)
+    os.makedirs(save_dir, exist_ok=True)
+
+    global_idx = 0  # Sequential image counter
+
+    with torch.no_grad():
+        for _, val_data in enumerate(data_loader):
+            model.feed_data(val_data, is_val=True)
+            model.test()
+            visuals = model.get_current_visuals()
+
+            batch_size = visuals['lq'].size(0)
+            for i in range(batch_size):
+                base_name = f"{name_prefix}_{global_idx:04d}"
+
+                lq_img = tensor2img(visuals['lq'][i], rgb2bgr=rgb2bgr, auto_rescale=True)
+                pred_img = tensor2img(visuals['result'][i], rgb2bgr=rgb2bgr, auto_rescale=True)
+                gt_img = tensor2img(visuals['gt'][i], rgb2bgr=rgb2bgr, auto_rescale=True) if 'gt' in visuals else None
+
+                imwrite(lq_img, osp.join(save_dir, f"{base_name}_lq.png"))
+                imwrite(pred_img, osp.join(save_dir, f"{base_name}_pred.png"))
+                if gt_img is not None:
+                    imwrite(gt_img, osp.join(save_dir, f"{base_name}_gt.png"))
+
+                global_idx += 1
+
+    model.net_g.train()
+    logger.info(f"[Best Model] Finished saving {name_prefix} images to: {save_dir}")
 
 
 def main():
@@ -202,7 +262,7 @@ def main():
 
     # create train and validation dataloaders
     result = create_train_val_dataloader(opt, logger)
-    train_loader, train_sampler, val_loader, total_epochs, total_iters = result
+    train_loader, train_sampler, val_loader, test_loader, total_epochs, total_iters = result
 
     # create model
     if resume_state:  # resume training
@@ -246,6 +306,12 @@ def main():
 
     # for epoch in range(start_epoch, total_epochs + 1):
     epoch = start_epoch
+
+    metrics_cfg = opt['val'].get('metrics', {})
+    rgb2bgr = opt['val'].get('rgb2bgr', True)
+    use_image = opt['val'].get('use_image', True)
+    test_metric_keys = None  # to store keys for test metrics
+
     while current_iter <= total_iters:
         train_sampler.set_epoch(epoch)
         prefetcher.reset()
@@ -311,7 +377,7 @@ def main():
                 # wheather use uint8 image to compute metrics
                 use_image = opt['val'].get('use_image', True)
                 model.validation(val_loader, current_iter, tb_logger,
-                                 opt['val']['save_img'], rgb2bgr, use_image )
+                                 opt['val']['save_img'], rgb2bgr, use_image)
                 log_vars = {'epoch': epoch, 'iter': current_iter, 'total_iter': total_iters}
                 log_vars.update({'lrs': model.get_current_learning_rate()})
                 log_vars.update(model.get_current_log())
@@ -321,8 +387,108 @@ def main():
             data_time = time.time()
             iter_time = time.time()
             train_data = prefetcher.next()
+
         # end of iter
+        # === Epoch-level processing ===
         epoch += 1
+        if opt['rank'] == 0:
+            # Compute full-train and full-val metrics
+            train_metrics = model.epoch_summary(train_loader, metrics_cfg, rgb2bgr, use_image)
+            val_metrics = model.epoch_summary(val_loader, metrics_cfg, rgb2bgr, use_image) if opt.get('val') else {}
+
+            # Initialize metrics_row
+            metrics_row = {
+                'epoch': epoch,
+                'iter': current_iter
+            }
+
+            # Add train metrics
+            for k, v in train_metrics.items():
+                metrics_row[f"train_{k.lower()}"] = v
+
+            # Add val metrics
+            for k, v in val_metrics.items():
+                metrics_row[f"val_{k.lower()}"] = v
+
+            # Prepare to handle test metrics
+            test_metrics = {}
+            test_keys = []  # to track keys for consistent NaN handling later
+
+            # === Best model logic ===
+            val_loss = val_metrics.get('mse') or val_metrics.get('val_loss')  # name depends on YAML
+            if val_loss is not None:
+                if 'best_val_loss' not in locals():
+                    best_val_loss = float('inf')
+
+                is_best = val_loss < best_val_loss
+
+                if is_best:
+                    best_val_loss = val_loss
+                    logger.info(f'[Best Model] Epoch {epoch} - val_loss improved to {val_loss:.4e}, saving...')
+                    model.save(epoch, current_iter=f"best_model_epoch_{epoch}")
+
+                    # Save val images
+                    save_entire_data_set(
+                        model=model,
+                        data_loader=val_loader,
+                        epoch=epoch,
+                        save_root=opt['path']['visualization'],
+                        rgb2bgr=rgb2bgr,
+                        name_prefix='val'
+                    )
+
+                    # Evaluate and save test set only if model improved
+                    if opt.get('test') is not None:
+                        test_metrics = model.epoch_summary(
+                            test_loader,
+                            metrics_cfg,
+                            rgb2bgr=rgb2bgr,
+                            use_image=use_image
+                        )
+
+                        for k, v in test_metrics.items():
+                            key = f"test_{k.lower()}"
+                            metrics_row[key] = v
+                            test_keys.append(key)
+
+
+                        # Save test images
+                        save_entire_data_set(
+                            model=model,
+                            data_loader=test_loader,
+                            epoch=epoch,
+                            save_root=opt['path']['visualization'],
+                            rgb2bgr=rgb2bgr,
+                            name_prefix='test'
+                        )
+
+                        # Store test metric keys once
+                        if test_metric_keys is None:
+                            test_metric_keys = [k for k in metrics_row.keys() if k.startswith('test_')]
+
+                else:
+                    # Fill test metrics with NaN using known keys
+                    for key in test_metric_keys:
+                        metrics_row[key] = float('nan')
+                        test_keys.append(key)
+
+
+            # === Write all metrics (train + val + test) to CSV ===
+            metrics_path = osp.join(opt['path']['log'], 'metrics.csv')
+            write_header = not osp.exists(metrics_path)
+
+            with open(metrics_path, 'a') as f:
+                if write_header:
+                    headers = ['epoch', 'iter']
+                    headers += [f"train_{k.lower()}" for k in train_metrics]
+                    headers += [f"val_{k.lower()}" for k in val_metrics]
+                    headers += test_keys
+                    f.write(','.join(headers) + '\n')
+
+                f.write(','.join(
+                    f"{metrics_row[k]:.4e}" if isinstance(metrics_row[k], float) else str(metrics_row[k])
+                    for k in headers
+                ) + '\n')
 
     # end of epoch
 

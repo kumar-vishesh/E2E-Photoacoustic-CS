@@ -12,3 +12,4 @@ tb_logger/
 gifs/
 *.log
 tmp/
+experiments_archived

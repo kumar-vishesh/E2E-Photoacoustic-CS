@@ -106,8 +106,9 @@ def create_dataloader(dataset,
             worker_init_fn, num_workers=num_workers, rank=rank,
             seed=seed) if seed is not None else None
     elif phase in ['val', 'test']:  # validation
+        batch_size = dataset_opt['batch_size_per_gpu']
         dataloader_args = dict(
-            dataset=dataset, batch_size=1, shuffle=False, num_workers=0)
+            dataset=dataset, batch_size=batch_size, shuffle=False, num_workers=0)
     else:
         raise ValueError(f'Wrong dataset phase: {phase}. '
                          "Supported ones are 'train', 'val' and 'test'.")

@@ -2,7 +2,7 @@
 # Custom NAFNet Config for On-the-Fly Compressed Synthetic Dataset
 # ------------------------------------------------------------------------
 
-name: NAFBlock_Learnable_CS_Matrix_8x
+name: Testing_8x_lr_1e-3_200kanneal_batch_8_seed_2116
 model_type: ImageRestorationModel
 scale: 1
 num_gpu: 1
@@ -12,8 +12,8 @@ datasets:
   train:
     name: synthetic-train
     type: UncompressedNpyDataset
-    target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/25x_Averaged/Original/data_split/train
-    upsample_type: pinv
+    target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/Synthetic/25x_Averaged/Original/data_split/train
+    upsample_type: learned
     normalize: true
     noise_std: 0.01
     reshape_to_image: true
@@ -28,19 +28,34 @@ datasets:
   val:
     name: synthetic-val
     type: UncompressedNpyDataset
-    target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/25x_Averaged/Original/data_split/val
-    upsample_type: pinv
+    target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/Synthetic/25x_Averaged/Original/data_split/val
+    upsample_type: learned
     normalize: true
     noise_std: 0.01
     reshape_to_image: true
     num_worker_per_gpu: 1
-    batch_size_per_gpu: 8
+    batch_size_per_gpu: 100
     use_shuffle: false
     phase: val
     save_debug_data: true
+  
+  test:
+    name: experimental-test
+    type: UncompressedNpyDataset
+    target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/Experimental/My_Hand/100
+    upsample_type: learned
+    normalize: true
+    noise_std: 0.00
+    reshape_to_image: true
+    num_worker_per_gpu: 1
+    batch_size_per_gpu: 100
+    use_shuffle: false
+    phase: test
+    save_debug_data: true
+
 
 network_g:
-  type: NAFNet
+  type: CS_NAFNet
   img_channel: 1
   width: 32
   enc_blk_nums: [1, 1, 1, 28]
@@ -48,6 +63,14 @@ network_g:
   dec_blk_nums: [1, 1, 1, 1]
   num_input_channels: 128
   compression_ratio: 8
+
+# Compressed Sensing parameters
+# These parameters are used to simulate the compressed sensing scenario
+# cs:
+#   type: BlockSum # Options: BlockSum, Naive, Blockwise_Random, Fully_Random, Learned
+#   num_input_channels: 128
+#   compression_ratio: 8
+#   upsample_type: learned  # Options: Learned, Nearest, Bilinear, Pinv
 
 path:
   root: /home/vk38/E2E-Photoacoustic-CS/
@@ -78,7 +101,7 @@ train:
     reduction: mean
 
 val:
-  val_freq: !!float 1e3
+  val_freq: !!float 1e4
   save_img: false
   use_image: false
   metrics:
@@ -86,15 +109,33 @@ val:
       type: calculate_mse
       crop_border: 0
       test_y_channel: false
+    ssim:
+      type: calculate_ssim
+      crop_border: 0
+      test_y_channel: false
+
+test:
+  metrics:
+    mse:
+      type: calculate_mse
+      crop_border: 0
+      test_y_channel: false
+    ssim:
+      type: calculate_ssim
+      crop_border: 0
+      test_y_channel: false
 
 logger:
-  print_freq: 100
-  save_checkpoint_freq: !!float 1e3
-  use_tb_logger: true
-  wandb:
-    project: ~
-    resume_id: ~
+   print_freq: 188
+   save_checkpoint_freq: !!float 1e4
+   use_tb_logger: false
+   use_wandb: false
+#   wandb:
+#     project: ~
+#     resume_id: ~
 
 dist_params:
   backend: nccl
   port: 2950
+
+manual_seed: 2116

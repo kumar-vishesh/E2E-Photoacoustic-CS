@@ -39,7 +39,7 @@ def img2tensor(imgs, bgr2rgb=True, float32=True):
         return _totensor(imgs, bgr2rgb, float32)
 
 
-def tensor2img(tensor, rgb2bgr=True, out_type=np.uint8, min_max=(0, 1)):
+def tensor2img(tensor, rgb2bgr=True, out_type=np.uint8, min_max=(0, 1), auto_rescale=False):
     """Convert torch Tensors into image numpy arrays.
 
     After clamping to [min, max], values will be normalized to [0, 1].
@@ -70,9 +70,18 @@ def tensor2img(tensor, rgb2bgr=True, out_type=np.uint8, min_max=(0, 1)):
         tensor = [tensor]
     result = []
     for _tensor in tensor:
-        _tensor = _tensor.squeeze(0).float().detach().cpu().clamp_(*min_max)
-        _tensor = (_tensor - min_max[0]) / (min_max[1] - min_max[0])
-
+        _tensor = _tensor.squeeze(0).float().detach().cpu()
+        
+        if auto_rescale:
+            min_val = _tensor.min()
+            max_val = _tensor.max()
+            if max_val != min_val:
+                _tensor = (_tensor - min_val) / (max_val - min_val)
+            else:
+                _tensor = torch.zeros_like(_tensor)
+        else:
+            _tensor = _tensor.clamp_(*min_max)
+            _tensor = (_tensor - min_max[0]) / (min_max[1] - min_max[0])
         n_dim = _tensor.dim()
         if n_dim == 4:
             img_np = make_grid(

@@ -26,8 +26,7 @@ class LearnableCompressionMatrix(nn.Module):
         for i in range(self.m):
             A[i, i * c: (i + 1) * c] = 1.0
 
-        # Add small noise
-        # TODO: Remove noise altogether off diagonal elements should be zero
+        # Ensure A is a learnable parameter
         # Right now this is to ensure the matrix is not singular and can be learned
         noise_std = 0.001
         A += torch.randn_like(A) * noise_std

@@ -20,6 +20,7 @@ from basicsr.models.archs import define_network
 from basicsr.models.base_model import BaseModel
 from basicsr.utils import get_root_logger, imwrite, tensor2img
 from basicsr.utils.dist_util import get_dist_info
+import os
 
 loss_module = importlib.import_module('basicsr.models.losses')
 metric_module = importlib.import_module('basicsr.metrics')
@@ -218,6 +219,10 @@ class ImageRestorationModel(BaseModel):
 
         l_total = 0
         loss_dict = OrderedDict()
+
+        # print(f"Output min/max: {self.output.min().item():.2f} / {self.output.max().item():.2f}")
+        # print(f"GT     min/max: {self.gt.min().item():.2f} / {self.gt.max().item():.2f}")
+
         # pixel loss
         if self.cri_pix:
             l_pix = 0.
@@ -405,91 +410,85 @@ class ImageRestorationModel(BaseModel):
             self._log_validation_metric_values(current_iter, dataloader.dataset.opt['name'],
                                                tb_logger, metrics_dict)
         return 0.
+    
     def nondist_validation(self, dataloader, current_iter, tb_logger, save_img, rgb2bgr, use_image):
         dataset_name = dataloader.dataset.opt['name']
         with_metrics = self.opt['val'].get('metrics') is not None
 
         if with_metrics:
-            self.metric_results = {
-                metric: 0.0 for metric in self.opt['val']['metrics'].keys()
-            }
+            self.metric_results = {metric: 0.0 for metric in self.opt['val']['metrics'].keys()}
+            metric_pixel_counts = {metric: 0 for metric in self.opt['val']['metrics'].keys()}
 
         pbar = tqdm(total=len(dataloader), unit='image', desc='Validating')
-        cnt = 0
-
         for idx, val_data in enumerate(dataloader):
-#            print(f"\nDEBUG lq_path: {val_data['lq_path']} (type: {type(val_data['lq_path'])})")
-#            print(f"DEBUG lq_path[0]: {val_data['lq_path'][0]} (type: {type(val_data['lq_path'][0])})")
-
             img_name = osp.splitext(osp.basename(val_data['lq_path'][0]))[0]
 
             self.feed_data(val_data, is_val=True)
-
-            if self.opt['val'].get('grids', False):
-                self.grids()
-
             self.test()
 
-            if self.opt['val'].get('grids', False):
-                self.grids_inverse()
-
             visuals = self.get_current_visuals()
-            sr_img = tensor2img([visuals['result']], rgb2bgr=rgb2bgr)
+            result = visuals['result']  # (N, C, H, W) or (C, H, W)
+            gt = visuals.get('gt')      # may be None
 
-            if 'gt' in visuals:
-                gt_img = tensor2img([visuals['gt']], rgb2bgr=rgb2bgr)
-                del self.gt  # cleanup
-
-            del self.lq
-            del self.output
-            torch.cuda.empty_cache()
-
+            # Save images if requested
             if save_img:
-                if sr_img.shape[2] == 6:
-                    L_img = sr_img[:, :, :3]
-                    R_img = sr_img[:, :, 3:]
-                    visual_dir = osp.join(self.opt['path']['visualization'], dataset_name)
-                    imwrite(L_img, osp.join(visual_dir, f'{img_name}_L.png'))
-                    imwrite(R_img, osp.join(visual_dir, f'{img_name}_R.png'))
+                sr_img = tensor2img([result], rgb2bgr=rgb2bgr)
+                if 'gt' in visuals:
+                    gt_img = tensor2img([gt], rgb2bgr=rgb2bgr)
+
+                save_dir = self.opt['path']['visualization']
+                if self.opt['is_train']:
+                    save_path = osp.join(save_dir, img_name, f'{img_name}_{current_iter}.png')
+                    save_gt_path = osp.join(save_dir, img_name, f'{img_name}_{current_iter}_gt.png')
                 else:
-                    if self.opt['is_train']:
-                        save_img_path = osp.join(self.opt['path']['visualization'],
-                                                 img_name,
-                                                 f'{img_name}_{current_iter}.png')
-                        save_gt_img_path = osp.join(self.opt['path']['visualization'],
-                                                    img_name,
-                                                    f'{img_name}_{current_iter}_gt.png')
-                    else:
-                        save_img_path = osp.join(self.opt['path']['visualization'], dataset_name,
-                                                 f'{img_name}.png')
-                        save_gt_img_path = osp.join(self.opt['path']['visualization'], dataset_name,
-                                                    f'{img_name}_gt.png')
+                    save_path = osp.join(save_dir, dataset_name, f'{img_name}.png')
+                    save_gt_path = osp.join(save_dir, dataset_name, f'{img_name}_gt.png')
 
-                    imwrite(sr_img, save_img_path)
-                    if 'gt' in visuals:
-                        imwrite(gt_img, save_gt_img_path)
+                imwrite(sr_img, save_path)
+                if 'gt' in visuals:
+                    imwrite(gt_img, save_gt_path)
 
-            if with_metrics and 'gt' in visuals:
-                opt_metric = deepcopy(self.opt['val']['metrics'])
-                for name, opt_ in opt_metric.items():
+            # Metric computation
+            if with_metrics and gt is not None:
+                for name, opt_ in deepcopy(self.opt['val']['metrics']).items():
                     metric_type = opt_.pop('type')
-                    if use_image:
-                        self.metric_results[name] += getattr(metric_module, metric_type)(sr_img, gt_img, **opt_)
-                    else:
-                        self.metric_results[name] += getattr(metric_module, metric_type)(
-                            visuals['result'], visuals['gt'], **opt_)
+                    metric_fn = getattr(metric_module, metric_type)
 
-            cnt += 1
+                    if use_image:
+                        sr_img = tensor2img([result], rgb2bgr=rgb2bgr, out_type=np.float32, min_max=(-1, 1))
+                        gt_img = tensor2img([gt], rgb2bgr=rgb2bgr, out_type=np.float32, min_max=(-1, 1))
+                        metric_val = metric_fn(sr_img, gt_img, **opt_)
+                        pixel_count = sr_img.size if opt_.get('average_over_pixels', True) else 1
+                    else:
+                        # Handle batching like in epoch_summary
+                        if result.ndim == 4:
+                            batch_size = result.size(0)
+                            for b in range(batch_size):
+                                pred = result[b]
+                                gt_b = gt[b] if gt.ndim == 4 else gt
+                                val = metric_fn(pred, gt_b, **opt_)
+                                px = torch.numel(pred) if opt_.get('average_over_pixels', True) else 1
+                                self.metric_results[name] += val * px
+                                metric_pixel_counts[name] += px
+                            continue
+                        else:
+                            val = metric_fn(result, gt, **opt_)
+                            px = torch.numel(result) if opt_.get('average_over_pixels', True) else 1
+
+                        self.metric_results[name] += val * px
+                        metric_pixel_counts[name] += px
+
             pbar.update(1)
             pbar.set_description(f'Test {img_name}')
-
         pbar.close()
 
-        if with_metrics and cnt > 0:
-            metrics_dict = {
-                name: val / cnt for name, val in self.metric_results.items()
-            }
-            self._log_validation_metric_values(current_iter, dataset_name, tb_logger, metrics_dict)
+        # Final metric averaging
+        if with_metrics:
+            for name in self.metric_results:
+                count = metric_pixel_counts[name] if metric_pixel_counts[name] > 0 else 1
+                self.metric_results[name] /= count
+
+            self._log_validation_metric_values(current_iter, dataset_name, tb_logger, self.metric_results)
 
         return 0.
 
@@ -525,18 +524,27 @@ class ImageRestorationModel(BaseModel):
         return out_dict
 
     def save(self, epoch, current_iter):
-        self.save_network(self.net_g, 'net_g', current_iter)
-        self.save_training_state(epoch, current_iter)
-       
-        # --- Save compression matrix A if used ---
+        is_best_model = isinstance(current_iter, str) and current_iter.startswith("best_model")
+
+        # Set directory for best or regular model saves
+        if is_best_model:
+            save_dir = os.path.join(self.opt['path']['models'], 'best_models')
+        else:
+            save_dir = self.opt['path']['models']
+
+        os.makedirs(save_dir, exist_ok=True)
+        self.save_network(self.net_g, 'net_g', current_iter, save_dir=save_dir)
+
+        # Save training state only for non-best models
+        if not is_best_model:
+            self.save_training_state(epoch, current_iter)
+
+        # Save compression matrix (remains in experiments_root)
         if getattr(self.net_g, 'use_compression', False):
             A = self.net_g.cs_matrix.A.detach().cpu().numpy()
+            comp_save_dir = self.opt['path']['experiments_root']
+            np.save(osp.join(comp_save_dir, 'compression_matrix.npy'), A)
 
-            # Save as .npy
-            save_dir = self.opt['path']['experiments_root']
-            np.save(osp.join(save_dir, 'compression_matrix.npy'), A)
-
-            # Save as heatmap PNG
             plt.figure(figsize=(6, 5))
             im = plt.imshow(A, aspect='auto', cmap='viridis')
             plt.colorbar(im, shrink=0.8)
@@ -544,5 +552,57 @@ class ImageRestorationModel(BaseModel):
             plt.xlabel("Original Channels")
             plt.ylabel("Compressed Channels")
             plt.tight_layout()
-            plt.savefig(osp.join(save_dir, 'compression_matrix.png'), dpi=300)
+            plt.savefig(osp.join(comp_save_dir, 'compression_matrix.png'), dpi=300)
             plt.close()
+
+
+
+    def epoch_summary(self, dataloader, metrics_cfg, rgb2bgr=True, use_image=True):
+        """Compute average metrics over the dataloader using the given metric configs."""
+        self.net_g.eval()
+
+        if not metrics_cfg:
+            return {}
+
+        results = {name: 0.0 for name in metrics_cfg}
+        pixel_counts = {name: 0 for name in metrics_cfg}
+
+        with torch.no_grad():
+            for data in tqdm(dataloader, desc='[Eval]', unit='img'):
+                self.feed_data(data, is_val=True)
+                self.test()
+
+                visuals = self.get_current_visuals()
+                if 'result' not in visuals or 'gt' not in visuals:
+                    continue
+
+                for name, cfg in deepcopy(metrics_cfg).items():
+                    metric_type = cfg.pop('type')
+                    metric_fn = getattr(metric_module, metric_type)
+                    average = cfg.pop('average_over_pixels', True)
+
+                    if use_image:
+                        sr_img = tensor2img([visuals['result']], rgb2bgr=rgb2bgr, out_type=np.float32, min_max=(-1, 1))
+                        gt_img = tensor2img([visuals['gt']], rgb2bgr=rgb2bgr, out_type=np.float32, min_max=(-1, 1))
+                        metric_val = metric_fn(sr_img, gt_img, **cfg)
+                        pixel_counts[name] += sr_img.size if average else 1
+                        results[name] += metric_val * (sr_img.size if average else 1)
+                    else:
+                        preds = visuals['result']  # shape (N, C, H, W)
+                        gts = visuals['gt']
+                        batch_size = preds.size(0)
+
+                        for b in range(batch_size):
+                            pred = preds[b]
+                            gt = gts[b]
+                            metric_val = metric_fn(pred, gt, **cfg)
+
+                            pixel_counts[name] += torch.numel(pred) if average else 1
+                            results[name] += metric_val * (torch.numel(pred) if average else 1)
+
+        # Final averaging
+        for name in results:
+            if pixel_counts[name] > 0:
+                results[name] /= pixel_counts[name]
+
+        return results

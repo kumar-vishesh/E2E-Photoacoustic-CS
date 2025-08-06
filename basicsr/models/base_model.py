@@ -4,6 +4,8 @@
 # Modified from BasicSR (https://github.com/xinntao/BasicSR)
 # Copyright 2018-2020 BasicSR Authors
 # ------------------------------------------------------------------------
+# Modified by: VK (2025)
+# ------------------------------------------------------------------------
 import logging
 import os
 import torch
@@ -192,7 +194,7 @@ class BaseModel():
         ]
 
     @master_only
-    def save_network(self, net, net_label, current_iter, param_key='params'):
+    def save_network(self, net, net_label, current_iter, param_key='params', save_dir=None):
         """Save networks.
 
         Args:
@@ -202,15 +204,18 @@ class BaseModel():
             param_key (str | list[str]): The parameter key(s) to save network.
                 Default: 'params'.
         """
+
         if current_iter == -1:
             current_iter = 'latest'
         save_filename = f'{net_label}_{current_iter}.pth'
-        save_path = os.path.join(self.opt['path']['models'], save_filename)
+        if save_dir is None:
+            save_dir = self.opt['path']['models']
+        os.makedirs(save_dir, exist_ok=True)
+        save_path = os.path.join(save_dir, save_filename)
 
         net = net if isinstance(net, list) else [net]
         param_key = param_key if isinstance(param_key, list) else [param_key]
-        assert len(net) == len(
-            param_key), 'The lengths of net and param_key should be the same.'
+        assert len(net) == len(param_key), 'The lengths of net and param_key should be the same.'
 
         save_dict = {}
         for net_, param_key_ in zip(net, param_key):

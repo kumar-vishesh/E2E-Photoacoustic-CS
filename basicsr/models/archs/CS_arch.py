@@ -83,7 +83,7 @@ class NAFBlock(nn.Module):
         return y + x * self.gamma
 
 
-class NAFNet(nn.Module):
+class CS_NAFNet(nn.Module):
 
     def __init__(self, img_channel=3, width=16, middle_blk_num=1, enc_blk_nums=[], dec_blk_nums=[],
              compression_ratio=None, num_input_channels=None):
@@ -191,10 +191,10 @@ class NAFNet(nn.Module):
         return x_recon, A, Ax
 
 
-class NAFNetLocal(Local_Base, NAFNet):
+class NAFNetLocal(Local_Base, CS_NAFNet):
     def __init__(self, *args, train_size=(1, 3, 256, 256), fast_imp=False, **kwargs):
         Local_Base.__init__(self)
-        NAFNet.__init__(self, *args, **kwargs)
+        CS_NAFNet.__init__(self, *args, **kwargs)
 
         N, C, H, W = train_size
         base_size = (int(H * 1.5), int(W * 1.5))
@@ -216,7 +216,7 @@ if __name__ == '__main__':
     middle_blk_num = 1
     dec_blks = [1, 1, 1, 1]
     
-    net = NAFNet(img_channel=img_channel, width=width, middle_blk_num=middle_blk_num,
+    net = CS_NAFNet(img_channel=img_channel, width=width, middle_blk_num=middle_blk_num,
                       enc_blk_nums=enc_blks, dec_blk_nums=dec_blks)
 
 
