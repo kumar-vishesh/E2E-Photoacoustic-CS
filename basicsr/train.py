@@ -273,6 +273,14 @@ def main():
                     f"iter: {resume_state['iter']}.")
         start_epoch = resume_state['epoch']
         current_iter = resume_state['iter']
+
+        # If resume state create a new metrics.csv file with naming convention _n, where n is the number of new files
+        metrics_path = osp.join(opt['path']['log'], 'metrics.csv')
+        n=0
+        while osp.exists(metrics_path):
+            metrics_path = osp.join(opt['path']['log'], f'metrics_{n}.csv')
+            n += 1
+
     else:
         model = create_model(opt)
         start_epoch = 0

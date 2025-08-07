@@ -2,7 +2,7 @@
 # Custom NAFNet Config for On-the-Fly Compressed Synthetic Dataset
 # ------------------------------------------------------------------------
 
-name: Testing_8x_lr_1e-3_200kanneal_batch_8_seed_2116
+name: Testing_8x
 model_type: ImageRestorationModel
 scale: 1
 num_gpu: 1
@@ -137,5 +137,3 @@ logger:
 dist_params:
   backend: nccl
   port: 2950
-
-manual_seed: 2116

@@ -34,6 +34,10 @@ def compute_mse(model, dataloader, device='cuda'):
             # Apply model compression to the noisy input
             x_recon, A, Ax = model.net_g.apply_compression(lq)
             output = model.net_g(x_recon.unsqueeze(1))
+            
+            # clip to (0,1)
+            output = torch.clamp(output, 0, 1)
+            gt = torch.clamp(gt, 0, 1)
 
             mse = F.mse_loss(output, gt, reduction='sum').item()
             total_mse += mse
