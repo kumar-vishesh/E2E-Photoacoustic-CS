@@ -70,7 +70,7 @@ network_g:
 #   type: BlockSum # Options: BlockSum, Naive, Blockwise_Random, Fully_Random, Learned
 #   num_input_channels: 128
 #   compression_ratio: 8
-#   upsample_type: learned  # Options: Learned, Nearest, Bilinear, Pinv
+#   upsampler: learned  # Options: Learned, Nearest, Bilinear, Pinv
 
 path:
   root: /home/vk38/E2E-Photoacoustic-CS/
