@@ -576,7 +576,7 @@ class ImageRestorationModel(BaseModel):
         pixel_counts = {name: 0 for name in metrics_cfg}
 
         with torch.no_grad():
-            for data in tqdm(dataloader, desc='[Eval]', unit='img'):
+            for data in tqdm(dataloader, desc='[Eval]', unit='batches'):
                 self.feed_data(data, is_val=True)
                 self.test()
 
