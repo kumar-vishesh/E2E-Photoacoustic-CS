@@ -226,8 +226,18 @@ class ImageRestorationModel(BaseModel):
         # pixel loss
         if self.cri_pix:
             l_pix = 0.
+
+            # weight for pixel loss in "linear in dB" with weight units as dB/pixel along the depth axis
+            if self.opt['train'].get('gain_weight', None) != None:
+                gain_weight = self.opt['train']['gain_weight']
+                B, C, H, W = self.gt.shape
+                #print(f"Height: {H}, Width: {W}, Gain weight: {gain_weight}")
+                gain_weight = 10 ** (gain_weight * torch.arange(W, device=self.gt.device) / 10)
+                gain_weight = gain_weight.reshape(1, 1, 1, W)
+                gain_weight = gain_weight.repeat(B, C, H, 1)
+
             for pred in preds:
-                l_pix += self.cri_pix(pred, self.gt)
+                l_pix += self.cri_pix(pred, self.gt, weight = gain_weight)
 
             # print('l pix ... ', l_pix)
             l_total += l_pix

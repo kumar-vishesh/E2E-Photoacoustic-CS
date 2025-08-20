@@ -2,7 +2,7 @@
 # Custom NAFNet Config for On-the-Fly Compressed Synthetic Dataset
 # ------------------------------------------------------------------------
 
-name: Testing_8x_L1_02
+name: Testing_8x_L1_025_TGC_7dB
 model_type: ImageRestorationModel
 scale: 1
 num_gpu: 1
@@ -15,7 +15,7 @@ datasets:
     target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/Synthetic/25x_Averaged/Original/data_split/train
     upsample_type: learned
     normalize: true
-    noise_std: 0.02
+    noise_std: 0.025
     reshape_to_image: true
     num_worker_per_gpu: 1
     batch_size_per_gpu: 8
@@ -31,7 +31,7 @@ datasets:
     target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/Synthetic/25x_Averaged/Original/data_split/val
     upsample_type: learned
     normalize: true
-    noise_std: 0.02
+    noise_std: 0.025
     reshape_to_image: true
     num_worker_per_gpu: 1
     batch_size_per_gpu: 100
@@ -99,6 +99,9 @@ train:
     type: L1Loss
     loss_weight: 1
     reduction: mean
+
+  gain_weight: 0.02625  # Gain weight in dB per pixel, e.g., 0.02625 for 7 dB over 267 pixels
+
 
 val:
   val_freq: !!float 1e4
