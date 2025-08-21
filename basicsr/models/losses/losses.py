@@ -118,7 +118,6 @@ class PSNRLoss(nn.Module):
         return self.loss_weight * self.scale * torch.log(((pred - target) ** 2).mean(dim=(1, 2, 3)) + 1e-8).mean()
 
 
-# TODO: Uncomment and implement the SMOOTH L1 loss if needed
 class SmoothL1Loss(nn.Module):
     """Smooth L1 loss."""
 
