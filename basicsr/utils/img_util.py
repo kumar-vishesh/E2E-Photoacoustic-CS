@@ -55,6 +55,7 @@ def tensor2img(tensor, rgb2bgr=True, out_type=np.uint8, min_max=(0, 1), auto_res
             to uint8 type with range [0, 255]; otherwise, float type with
             range [0, 1]. Default: ``np.uint8``.
         min_max (tuple[int]): min and max values for clamp.
+        auto_rescale (bool): Whether to rescale the image to 0-1. If True, min_max will be ignored.
 
     Returns:
         (Tensor or list): 3D ndarray of shape (H x W x C) OR 2D ndarray of

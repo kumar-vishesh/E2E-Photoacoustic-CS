@@ -2,7 +2,7 @@
 # Custom NAFNet Config for On-the-Fly Compressed Synthetic Dataset
 # ------------------------------------------------------------------------
 
-name: Testing_8x_SmoothL1_025_TGC_7dB
+name: Testing_8x_L1_025 #_TGC_7dB
 model_type: ImageRestorationModel
 scale: 1
 num_gpu: 1
@@ -42,7 +42,7 @@ datasets:
   test:
     name: experimental-test
     type: UncompressedNpyDataset
-    target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/Experimental/My_Hand/100
+    target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/Experimental/forearm/
     upsample_type: learned
     normalize: true
     noise_std: 0.00
@@ -96,11 +96,11 @@ train:
   warmup_iter: -1
 
   pixel_opt:
-    type: SmoothL1Loss
+    type: L1Loss
     loss_weight: 1
     reduction: mean
   
-  gain_weight: 0.02625  # Gain weight in dB per pixel, e.g., 0.02625 for 7 dB over 267 pixels
+#  gain_weight: 0.02625  # Gain weight in dB per pixel, e.g., 0.02625 for 7 dB over 267 pixels
 
 
 val:

@@ -207,11 +207,17 @@ def save_entire_data_set(model, data_loader, epoch, save_root, rgb2bgr=True, nam
                 lq_img = tensor2img(visuals['lq'][i], rgb2bgr=rgb2bgr, auto_rescale=True)
                 pred_img = tensor2img(visuals['result'][i], rgb2bgr=rgb2bgr, auto_rescale=True)
                 gt_img = tensor2img(visuals['gt'][i], rgb2bgr=rgb2bgr, auto_rescale=True) if 'gt' in visuals else None
+                A = tensor2img(visuals['A'][i], rgb2bgr=False, auto_rescale=True)
+                Ax = tensor2img(visuals['Ax'][i], rgb2bgr=False, auto_rescale=True)
+                x_upsample = tensor2img(visuals['x_upsample'][i], rgb2bgr=False, auto_rescale=True)
 
                 imwrite(lq_img, osp.join(save_dir, f"{base_name}_lq.png"))
                 imwrite(pred_img, osp.join(save_dir, f"{base_name}_pred.png"))
                 if gt_img is not None:
                     imwrite(gt_img, osp.join(save_dir, f"{base_name}_gt.png"))
+                imwrite(A, osp.join(save_dir, f"{base_name}_A.png"))
+                imwrite(Ax, osp.join(save_dir, f"{base_name}_Ax.png"))
+                imwrite(x_upsample, osp.join(save_dir, f"{base_name}_x_upsample.png"))
 
                 global_idx += 1
 

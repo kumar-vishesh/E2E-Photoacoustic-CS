@@ -537,6 +537,10 @@ class ImageRestorationModel(BaseModel):
     def get_current_visuals(self):
         out_dict = OrderedDict()
         out_dict['lq'] = self.lq.detach().cpu()
+        x_recon, A, Ax = self.net_g.apply_compression(self.lq)
+        out_dict['x_upsample'] = x_recon.detach().cpu()
+        out_dict['A'] = A.detach().cpu()
+        out_dict['Ax'] = Ax.detach().cpu()
         out_dict['result'] = self.output.detach().cpu()
         if hasattr(self, 'gt'):
             out_dict['gt'] = self.gt.detach().cpu()
