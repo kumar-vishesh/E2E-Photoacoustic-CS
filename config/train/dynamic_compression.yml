@@ -2,7 +2,7 @@
 # Custom NAFNet Config for On-the-Fly Compressed Synthetic Dataset
 # ------------------------------------------------------------------------
 
-name: Testing_8x_L1_025 #_TGC_7dB
+name: Testing_8x_L1_025_TGC_70dB
 model_type: ImageRestorationModel
 scale: 1
 num_gpu: 1
@@ -100,7 +100,7 @@ train:
     loss_weight: 1
     reduction: mean
   
-#  gain_weight: 0.02625  # Gain weight in dB per pixel, e.g., 0.02625 for 7 dB over 267 pixels
+gain_weight: 0.2625  # Gain weight in dB per pixel, e.g., 0.2625 for 70 dB over 267 pixels
 
 
 val:
