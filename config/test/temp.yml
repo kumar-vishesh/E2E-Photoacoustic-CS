@@ -8,10 +8,10 @@ datasets:
   val:
     name: synthetic-val
     type: UncompressedNpyDataset
-    target_dir: ''           # <-- To be filled by eval script
+    target_dir: '/home/vk38/E2E-Photoacoustic-CS/datasets/Experimental/forearm/'           # <-- To be filled by eval script
     upsample_type: pinv
     normalize: true
-    noise_std: 0.01
+    noise_std: 0.00
     reshape_to_image: true
     num_worker_per_gpu: 1
     batch_size_per_gpu: 1
@@ -20,22 +20,36 @@ datasets:
     pin_memory: true
 
 network_g:
-  type: CS_NAFNet
+  type: NAFNet
   img_channel: 1
   width: 32
   enc_blk_nums: [1, 1, 1, 28]
   middle_blk_num: 1
   dec_blk_nums: [1, 1, 1, 1]
-  num_input_channels: ''
-  compression_ratio: ''
+  num_input_channels: 128
+  compression_ratio: 8
 
 path:
-  root: ''
-  experiments_root: ''
-  results_root: ''
-  pretrain_network_g: ''
+  root: /home/vk38/E2E-Photoacoustic-CS/
+  experiments_root: /home/vk38/E2E-Photoacoustic-CS/experiments
+  results_root: /home/vk38/E2E-Photoacoustic-CS/results
+  pretrain_network_g: 'experiments_archived/Block_Diag_Learnable_CS_Matrix_8x/models/net_g_33000.pth'
   strict_load_g: true
   resume_state: ''
 
 val:
-  save_img: true
+  save_img: false
+  use_image: false
+  metrics:
+    l1:
+      type: calculate_l1
+      crop_border: 0
+      test_y_channel: false
+    mse:
+      type: calculate_mse
+      crop_border: 0
+      test_y_channel: false
+    ssim:
+      type: calculate_ssim
+      crop_border: 0
+      test_y_channel: false
