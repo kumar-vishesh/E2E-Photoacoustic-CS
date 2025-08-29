@@ -18,6 +18,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from basicsr.models.archs import define_network
+from basicsr.models.modules.cs_frontend import CSFrontEnd
 from basicsr.models.base_model import BaseModel
 from basicsr.utils import get_root_logger, imwrite, tensor2img
 from basicsr.utils.dist_util import get_dist_info
@@ -42,7 +43,7 @@ class E2ECompressedSensing(BaseModel):
         A = np.load(A_path)  # (compressed_dim, original_dim)
         output_shape = tuple(comp_cfg.get('output_shape', (64, 64)))
 
-        self.frontend = CompressionFrontend(
+        self.frontend = CSFrontEnd(
             A=A,
             learn_A=comp_cfg.get('learn_A', False),
             use_cnn_upsampler=comp_cfg.get('use_cnn_upsampler', False),
