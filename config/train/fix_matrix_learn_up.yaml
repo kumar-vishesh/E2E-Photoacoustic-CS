@@ -1,0 +1,141 @@
+# ------------------------------------------------------------------------
+# E2E Compressed Sensing Config for NAFNet Backbone
+# ------------------------------------------------------------------------
+
+name: Blocksum_8x_L1_025_learned_upsampler
+model_type: E2ECompressedSensing
+scale: 1
+num_gpu: 1
+mixed_precision: true
+
+datasets:
+  train:
+    name: synthetic-train
+    type: UncompressedNpyDataset
+    target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/Synthetic/25x_Averaged/Original/data_split/train
+    upsample_type: learned
+    normalize: true
+    noise_std: 0.025
+    reshape_to_image: true
+    num_worker_per_gpu: 1
+    batch_size_per_gpu: 8
+    use_shuffle: true
+    phase: train
+    pin_memory: true
+    save_debug_data: true
+
+  val:
+    name: synthetic-val
+    type: UncompressedNpyDataset
+    target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/Synthetic/25x_Averaged/Original/data_split/val
+    upsample_type: learned
+    normalize: true
+    noise_std: 0.025
+    reshape_to_image: true
+    num_worker_per_gpu: 1
+    batch_size_per_gpu: 100
+    use_shuffle: false
+    phase: val
+    save_debug_data: true
+
+  test:
+    name: experimental-test
+    type: UncompressedNpyDataset
+    target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/Experimental/forearm/
+    upsample_type: learned
+    normalize: true
+    noise_std: 0.00
+    reshape_to_image: true
+    num_worker_per_gpu: 1
+    batch_size_per_gpu: 100
+    use_shuffle: false
+    phase: test
+    save_debug_data: true
+
+network_g:
+  type: NAFNet
+  img_channel: 1
+  width: 32
+  enc_blk_nums: [1, 1, 1, 28]
+  middle_blk_num: 1
+  dec_blk_nums: [1, 1, 1, 1]
+  num_input_channels: 128
+
+compression:
+  matrix_init: blocksum         # Options: blocksum, blockwise_random, fully_random, naive
+  matrix_learned: fixed         # Options: fixed, learned
+  compression_factor: 8
+  input_size: 128
+  upsampler: learned            # Options: pinv, learned, bilinear
+  # Optionally: A_path: /path/to/precomputed/matrix.npy
+
+path:
+  root: /home/vk38/E2E-Photoacoustic-CS/
+  experiments_root: /home/vk38/E2E-Photoacoustic-CS/experiments
+  results_root: /home/vk38/E2E-Photoacoustic-CS/results
+  pretrain_network_g: ~
+  strict_load_g: true
+  resume_state: ~
+
+train:
+  optim_g:
+    type: AdamW
+    lr: !!float 1e-3
+    weight_decay: !!float 1e-3
+    betas: [0.9, 0.9]
+
+  scheduler:
+    type: TrueCosineAnnealingLR
+    T_max: 200000
+    eta_min: !!float 1e-7
+
+  total_iter: 100000
+  warmup_iter: -1
+
+  pixel_opt:
+    type: L1Loss
+    loss_weight: 1
+    reduction: mean
+
+# gain_weight: 0.2625  # Gain weight in dB per pixel, e.g., 0.2625 for 70 dB over 267 pixels
+
+val:
+  val_freq: !!float 1e4
+  save_img: false
+  use_image: false
+  metrics:
+    l1:
+      type: calculate_l1
+      crop_border: 0
+      test_y_channel: false
+    mse:
+      type: calculate_mse
+      crop_border: 0
+      test_y_channel: false
+    ssim:
+      type: calculate_ssim
+      crop_border: 0
+      test_y_channel: false
+
+test:
+  metrics:
+    l1:
+      type: calculate_l1
+      crop_border: 0
+      test_y_channel: false
+    mse:
+      type: calculate_mse
+      crop_border: 0
+      test_y_channel: false
+    ssim:
+      type: calculate_ssim
+      crop_border: 0
+      test_y_channel: false
+
+logger:
+   print_freq: 188
+   save_checkpoint_freq: !!float 1e4
+   use_tb_logger: false
+   use_wandb: false
+
+dist_params:

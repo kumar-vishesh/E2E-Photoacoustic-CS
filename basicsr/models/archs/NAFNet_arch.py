@@ -173,33 +173,33 @@ class NAFNet(nn.Module):
         x = F.pad(x, (0, mod_pad_w, 0, mod_pad_h))
         return x
 
-    def apply_compression(self, x):
-        """
-        Apply the learnable compression matrix A to reduce channel dimensionality.
+    # def apply_compression(self, x):
+    #     """
+    #     Apply the learnable compression matrix A to reduce channel dimensionality.
 
-        Parameters
-        ----------
-        x : torch.Tensor
-            Input tensor of shape (B, 1, C, T) or (B, C, T), where:
-            - B is the batch size
-            - C is the number of input channels (e.g., transducers)
-            - T is the number of time steps
+    #     Parameters
+    #     ----------
+    #     x : torch.Tensor
+    #         Input tensor of shape (B, 1, C, T) or (B, C, T), where:
+    #         - B is the batch size
+    #         - C is the number of input channels (e.g., transducers)
+    #         - T is the number of time steps
 
-        Returns
-        -------
-        x_recon : torch.Tensor
-            Reconstructed input from compressed form, of shape (B, C, T)
-        A : torch.Tensor
-            The learned compression matrix of shape (m, C)
-        Ax : torch.Tensor
-            Compressed signal of shape (B, m, T), where m = C // compression_ratio
-        """
-        if not self.use_compression:
-            raise RuntimeError("Compression matrix was not initialized in NAFNet.")
-        Ax, A = self.cs_matrix(x)
-        A_pinv = torch.linalg.pinv(A)
-        x_recon = torch.matmul(A_pinv.unsqueeze(0), Ax)
-        return x_recon, A, Ax
+    #     Returns
+    #     -------
+    #     x_recon : torch.Tensor
+    #         Reconstructed input from compressed form, of shape (B, C, T)
+    #     A : torch.Tensor
+    #         The learned compression matrix of shape (m, C)
+    #     Ax : torch.Tensor
+    #         Compressed signal of shape (B, m, T), where m = C // compression_ratio
+    #     """
+    #     if not self.use_compression:
+    #         raise RuntimeError("Compression matrix was not initialized in NAFNet.")
+    #     Ax, A = self.cs_matrix(x)
+    #     A_pinv = torch.linalg.pinv(A)
+    #     x_recon = torch.matmul(A_pinv.unsqueeze(0), Ax)
+    #     return x_recon, A, Ax
 
 
 class NAFNetLocal(Local_Base, NAFNet):

@@ -6,8 +6,23 @@
 # ------------------------------------------------------------------------
 # Modified by VK (2025)
 # ------------------------------------------------------------------------
-
 import os
+
+def limit_cpu_threads(num_threads=1):
+    """Limit CPU threads for stable multi-process training."""
+    os.environ['OMP_NUM_THREADS'] = str(num_threads)
+    os.environ['MKL_NUM_THREADS'] = str(num_threads)
+    os.environ['OPENBLAS_NUM_THREADS'] = str(num_threads)
+    os.environ['NUMEXPR_NUM_THREADS'] = str(num_threads)
+
+    try:
+        import cv2
+        cv2.setNumThreads(num_threads)
+    except ImportError:
+        pass
+
+limit_cpu_threads(1)
+
 import argparse
 import datetime
 import logging
@@ -31,18 +46,7 @@ from copy import deepcopy
 from multiprocessing import Process, Queue
 
 
-def limit_cpu_threads(num_threads=1):
-    """Limit CPU threads for stable multi-process training."""
-    os.environ['OMP_NUM_THREADS'] = str(num_threads)
-    os.environ['MKL_NUM_THREADS'] = str(num_threads)
-    os.environ['OPENBLAS_NUM_THREADS'] = str(num_threads)
-    os.environ['NUMEXPR_NUM_THREADS'] = str(num_threads)
 
-    try:
-        import cv2
-        cv2.setNumThreads(num_threads)
-    except ImportError:
-        pass
 
 def parse_options(is_train=True):
     parser = argparse.ArgumentParser()
@@ -525,7 +529,6 @@ def main():
 
 
 if __name__ == '__main__':
-    limit_cpu_threads(1)
 
     # Set environment variables for distributed training
     os.environ['GRPC_POLL_STRATEGY']='epoll1'

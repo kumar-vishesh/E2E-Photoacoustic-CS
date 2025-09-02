@@ -1,110 +1,137 @@
 # ------------------------------------------------------------------------
-# Vishesh Kumar, 2025 
-# ------------------------------------------------------------------------
-# This is the front end compressed sensing model for photoacoustic imaging.
-# ------------------------------------------------------------------------
-# NOTE THIS FILE IS NOT IN USE YET, IT IS A WORK IN PROGRESS.
+# VK (2025)
+# Frontend for compressed sensing (A) + upsampling (pinv or learned)
 # ------------------------------------------------------------------------
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from typing import Tuple
-from basicsr.models.modules.Learned_Upsampler import LearnedUpsampler
+from basicsr.models.modules.Learned_Upsampler import Learned_Upsampler
+
 
 class CSFrontend(nn.Module):
     """
-    Modular front end for compressed sensing: compression + upsampling.
-    Compression is done by a matrix (learnable or fixed), upsampling by pinv, bilinear, or learned upsampler.
+    Compression with matrix A (learned or fixed), followed by upsampling
+    via pinv(A) or a learned upsampler.
+
+    Supported combos:
+      1) fixed A  + pinv   → no grads to A
+      2) fixed A  + learned→ grads only to upsampler
+      3) learned A+ pinv   → grads flow through pinv to A
+      4) learned A+ learned→ grads to both A and upsampler
     """
     def __init__(self, config):
         super().__init__()
-        self.config = config
         self.compression_factor = config.get('compression_factor', 8)
         self.input_size = config.get('input_size', 128)
         self.output_size = self.input_size // self.compression_factor
 
-        self.matrix_learned = config.get('matrix_learned', 'learned')
-        self.matrix_init = config.get('matrix_init', 'BlockSum')
-        self.upsampler_type = config.get('upsampler', 'learned')
+        self.matrix_learned = config.get('matrix_learned', 'learned').lower()  # 'fixed' | 'learned'
+        self.matrix_init    = config.get('matrix_init', 'blocksum').lower()
+        self.upsampler_type = config.get('upsampler', 'learned').lower()       # 'pinv' | 'learned'
 
-        self._init_compression_matrix()
-        self._init_upsampler()
+        self._init_compression_matrix()  # sets self.compression_matrix (Parameter or buffer)
+        self._init_upsampler()           # sets self.upsample (Module)
 
+    # ---------------- A (compression matrix) ----------------
     def _init_compression_matrix(self):
-        # Initialize compression matrix shape: (output_size, input_size)
+        matrix_type   = self.matrix_init
+        num_blocks    = self.output_size                 # rows of A
+        num_channels  = self.input_size                  # cols of A
+        k             = self.compression_factor
+
+        if matrix_type == "blocksum":
+            group = torch.ones(k)                        # shape fixes left as you had them
+            mat = torch.kron(torch.eye(num_blocks), group)
+        elif matrix_type == "blockwise_random":
+            mat = torch.zeros((num_blocks, num_channels))
+            for i in range(num_blocks):
+                s, e = i * k, (i + 1) * k
+                block = (torch.randint(0, 2, (k,)) * 2 - 1).float()
+                mat[i, s:e] = block
+        elif matrix_type == "fully_random":
+            mat = torch.zeros((num_blocks, num_channels))
+            perm = torch.randperm(num_channels)
+            for i in range(num_blocks):
+                idx = perm[i * k:(i + 1) * k]
+                mat[i, idx] = (torch.randint(0, 2, (k,)) * 2 - 1).float()
+        elif matrix_type == "naive":
+            mat = torch.zeros((num_blocks, num_channels))
+            for i in range(num_blocks):
+                mat[i, i * k] = 1.0
+        else:
+            raise ValueError(f"Unknown matrix type: {self.matrix_init}")
+
+        mat = mat.float()
+
         if self.matrix_learned == 'learned':
-            if self.matrix_init == 'BlockSum':
-                mat = torch.randn(self.output_size, self.input_size)
-            elif self.matrix_init == 'Naive':
-                mat = torch.randn(self.output_size, self.input_size)
-            else:
-                raise ValueError(f"Invalid matrix initialization: {self.matrix_init}")
+            # Cases (3) and (4): trainable A
             self.compression_matrix = nn.Parameter(mat)
         elif self.matrix_learned == 'fixed':
-            if self.matrix_init == 'BlockSum':
-                mat = torch.randn(self.output_size, self.input_size)
-            elif self.matrix_init == 'Naive':
-                mat = torch.randn(self.output_size, self.input_size)
-            else:
-                raise ValueError(f"Invalid matrix initialization: {self.matrix_init}")
+            # Cases (1) and (2): non-trainable A
             self.register_buffer('compression_matrix', mat)
         else:
-            raise ValueError(f"Invalid matrix_learned flag: {self.matrix_learned}")
+            raise ValueError("matrix_learned must be 'fixed' or 'learned'")
 
+    # ---------------- Upsampler ----------------
     def _init_upsampler(self):
         if self.upsampler_type == 'learned':
-            self.upsampler = LearnedUpsampler(compression_factor=self.compression_factor)
-        elif self.upsampler_type == 'bilinear':
-            self.upsampler = nn.Upsample(scale_factor=self.compression_factor, mode='bilinear', align_corners=False)
+            # Cases (2) and (4): learnable upsampler
+            self.upsample = Learned_Upsampler(compression_factor=self.compression_factor)
+
         elif self.upsampler_type == 'pinv':
-            # pinv matrix: (input_size, output_size)
-            pinv_mat = torch.pinverse(self.compression_matrix if isinstance(self.compression_matrix, torch.Tensor) else self.compression_matrix.data)
-            self.register_buffer('pinv_matrix', pinv_mat)
-            self.upsampler = None
-        else:
-            raise ValueError(f"Invalid upsampler type: {self.upsampler_type}")
+            if self.matrix_learned == 'fixed':
+                # Case (1): fixed A + pinv  → compute once (no grad to A)
+                pinv_A = torch.linalg.pinv(self.compression_matrix)
+                self.register_buffer('pinv_matrix', pinv_A)
 
+                class FixedPinv(nn.Module):
+                    def __init__(self, pinv):
+                        super().__init__()
+                        self.register_buffer('pinv', pinv)
+                    def forward(self, x):
+                        # x: (B,C,rows,W) ; pinv: (cols,rows) ; output: (B,C,cols,W)
+                        return (x.permute(0,1,3,2) @ self.pinv.t()).permute(0,1,3,2)
+
+                self.upsample = FixedPinv(self.pinv_matrix)
+
+            else:
+                # Case (3): learned A + pinv → recompute each forward (grad flows to A)
+                class PinvUpsampler(nn.Module):
+                    def __init__(self, getA):
+                        super().__init__()
+                        self._getA = getA   # callable; avoids parent<->child cycle
+                    def forward(self, x):
+                        A = self._getA()                 # (rows, cols)
+                        pinv_A = torch.linalg.pinv(A)    # differentiable wrt A
+                        return (x.permute(0,1,3,2) @ pinv_A.t()).permute(0,1,3,2)
+
+                self.upsample = PinvUpsampler(self.get_matrix)
+        else:
+            raise ValueError("upsampler must be 'pinv' or 'learned'")
+
+    # ---------------- Forward ----------------
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (B, C, H, W) or (B, 1, H, W)
-        B, C, H, W = x.shape
-        # Flatten spatial dims for compression: (B, C, H*W)
-        x_flat = x.view(B, C, -1)
-        # Apply compression matrix: (output_size, input_size)
-        if isinstance(self.compression_matrix, nn.Parameter) or self.matrix_learned == 'learned':
-            x_cs = torch.matmul(x_flat, self.compression_matrix.t())  # (B, C, output_size)
-        else:
-            x_cs = torch.matmul(x_flat, self.compression_matrix.t())
+        # x: (B, C, H, W)
+        A = self.get_matrix()                                # (rows=H/k, cols=H)
+        x_cs = (x.permute(0,1,3,2) @ A.t()).permute(0,1,3,2) # (B,C,rows,W)
 
-        # Upsampling
-        if self.upsampler_type == 'pinv':
-            # Apply pseudo-inverse: (B, C, input_size)
-            x_up = torch.matmul(x_cs, self.pinv_matrix.t())
-            # Reshape back to (B, C, H, W)
-            x_up = x_up.view(B, C, H, W)
-        else:
-            # Reshape to (B, C, output_H, output_W) for upsampler
-            # Assume output_H, output_W = H // compression_factor, W // compression_factor
-            output_H = H // self.compression_factor
-            output_W = W // self.compression_factor
-            x_cs_img = x_cs.view(B, C, output_H, output_W)
-            x_up = self.upsampler(x_cs_img)
-        return x_up
+        if self.upsampler_type == 'learned' and x_cs.shape[1] != 1:
+            raise ValueError(f"Learned_Upsampler expects C==1, got {x_cs.shape[1]}")
 
-    def set_matrix(self, new_matrix: torch.Tensor):
-        """Update compression matrix."""
-        if self.matrix_learned == 'learned':
-            self.compression_matrix.data.copy_(new_matrix)
-        else:
-            self.compression_matrix.copy_(new_matrix)
+        return self.upsample(x_cs)
 
+    # ---------------- Accessors ----------------
     def get_matrix(self) -> torch.Tensor:
         return self.compression_matrix
 
-    def get_upsampler(self):
-        if self.upsampler_type == 'pinv':
-            return self.pinv_matrix
-        return self.upsampler
-        y = self.upsampler(x_compressed)
+    def set_matrix(self, new_matrix: torch.Tensor):
+        with torch.no_grad():
+            self.compression_matrix.copy_(new_matrix)
 
-        return x
+    # (optional helpers)
+    def get_compressed(self, x: torch.Tensor) -> torch.Tensor:
+        A = self.get_matrix()
+        return (x.permute(0,1,3,2) @ A.t()).permute(0,1,3,2)
+
+    def get_upsampled(self, x: torch.Tensor) -> torch.Tensor:
+        return self.forward(x)

@@ -18,7 +18,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from basicsr.models.archs import define_network
-from basicsr.models.modules.cs_frontend import CSFrontEnd
+from basicsr.models.modules.cs_frontend import CSFrontend
 from basicsr.models.base_model import BaseModel
 from basicsr.utils import get_root_logger, imwrite, tensor2img
 from basicsr.utils.dist_util import get_dist_info
@@ -39,16 +39,7 @@ class E2ECompressedSensing(BaseModel):
 
         # add compression+upsample frontend
         comp_cfg = opt.get('compression', {})
-        A_path = comp_cfg.get('A_path')  # path to npy file with matrix A
-        A = np.load(A_path)  # (compressed_dim, original_dim)
-        output_shape = tuple(comp_cfg.get('output_shape', (64, 64)))
-
-        self.frontend = CSFrontEnd(
-            A=A,
-            learn_A=comp_cfg.get('learn_A', False),
-            use_cnn_upsampler=comp_cfg.get('use_cnn_upsampler', False),
-            output_shape=output_shape
-        ).to(self.device)
+        self.frontend = CSFrontend(comp_cfg).to(self.device)
 
         # load pretrained models
         load_path = self.opt['path'].get('pretrain_network_g', None)
@@ -218,13 +209,9 @@ class E2ECompressedSensing(BaseModel):
 
         if self.opt['train'].get('mixup', False):
             self.mixup_aug()
-            
-        if getattr(self.net_g, 'use_compression', False):
-            x_recon, _, _ = self.net_g.apply_compression(self.lq)
-            x_recon = x_recon.unsqueeze(1)
-        else:
-            x_recon = self.lq  # fallback (no compression)
 
+        # Use CSFrontend for compression + upsampling
+        x_recon = self.frontend(self.lq)
         preds = self.net_g(x_recon)
 
         if not isinstance(preds, list):
@@ -235,30 +222,23 @@ class E2ECompressedSensing(BaseModel):
         l_total = 0
         loss_dict = OrderedDict()
 
-        # print(f"Output min/max: {self.output.min().item():.2f} / {self.output.max().item():.2f}")
-        # print(f"GT     min/max: {self.gt.min().item():.2f} / {self.gt.max().item():.2f}")
-
         # pixel loss
         if self.cri_pix:
             l_pix = 0.
             for pred in preds:
                 l_pix += self.cri_pix(pred, self.gt)
-
-            # print('l pix ... ', l_pix)
             l_total += l_pix
             loss_dict['l_pix'] = l_pix
 
         # perceptual loss
         if self.cri_perceptual:
             l_percep, l_style = self.cri_perceptual(self.output, self.gt)
-        #
             if l_percep is not None:
                 l_total += l_percep
                 loss_dict['l_percep'] = l_percep
             if l_style is not None:
                 l_total += l_style
                 loss_dict['l_style'] = l_style
-
 
         l_total = l_total + 0. * sum(p.sum() for p in self.net_g.parameters())
 
@@ -267,7 +247,6 @@ class E2ECompressedSensing(BaseModel):
         if use_grad_clip:
             torch.nn.utils.clip_grad_norm_(self.net_g.parameters(), 0.01)
         self.optimizer_g.step()
-
 
         self.log_dict = self.reduce_loss_dict(loss_dict)
 
@@ -284,12 +263,8 @@ class E2ECompressedSensing(BaseModel):
                     j = n
 
                 inputs = self.lq[i:j]
-                if getattr(self.net_g, 'use_compression', False):
-                    x_recon, _, _ = self.net_g.apply_compression(inputs)
-                    x_recon = x_recon.unsqueeze(1)
-                else:
-                    x_recon = inputs
-
+                # Use CSFrontend for compression + upsampling
+                x_recon = self.frontend(inputs)
                 pred = self.net_g(x_recon)
                 if isinstance(pred, list):
                     pred = pred[-1]
@@ -301,130 +276,131 @@ class E2ECompressedSensing(BaseModel):
 
 
     def dist_validation(self, dataloader, current_iter, tb_logger, save_img, rgb2bgr, use_image):
-        dataset_name = dataloader.dataset.opt['name']
-        with_metrics = self.opt['val'].get('metrics') is not None
-        if with_metrics:
-            self.metric_results = {
-                metric: 0
-                for metric in self.opt['val']['metrics'].keys()
-            }
+        # dataset_name = dataloader.dataset.opt['name']
+        # with_metrics = self.opt['val'].get('metrics') is not None
+        # if with_metrics:
+        #     self.metric_results = {
+        #         metric: 0
+        #         for metric in self.opt['val']['metrics'].keys()
+        #     }
 
-        rank, world_size = get_dist_info()
-        if rank == 0:
-            pbar = tqdm(total=len(dataloader), unit='image')
+        # rank, world_size = get_dist_info()
+        # if rank == 0:
+        #     pbar = tqdm(total=len(dataloader), unit='image')
 
-        cnt = 0
+        # cnt = 0
 
-        for idx, val_data in enumerate(dataloader):
-            if idx % world_size != rank:
-                continue
+        # for idx, val_data in enumerate(dataloader):
+        #     if idx % world_size != rank:
+        #         continue
 
-            img_name = osp.splitext(osp.basename(val_data['lq_path'][0]))[0]
+        #     img_name = osp.splitext(osp.basename(val_data['lq_path'][0]))[0]
 
-            self.feed_data(val_data, is_val=True)
-            if self.opt['val'].get('grids', False):
-                self.grids()
+        #     self.feed_data(val_data, is_val=True)
+        #     if self.opt['val'].get('grids', False):
+        #         self.grids()
 
-            self.test()
+        #     self.test()
 
-            if self.opt['val'].get('grids', False):
-                self.grids_inverse()
+        #     if self.opt['val'].get('grids', False):
+        #         self.grids_inverse()
 
-            visuals = self.get_current_visuals()
-            sr_img = tensor2img([visuals['result']], rgb2bgr=rgb2bgr)
-            if 'gt' in visuals:
-                gt_img = tensor2img([visuals['gt']], rgb2bgr=rgb2bgr)
-                del self.gt
+        #     visuals = self.get_current_visuals()
+        #     sr_img = tensor2img([visuals['result']], rgb2bgr=rgb2bgr)
+        #     if 'gt' in visuals:
+        #         gt_img = tensor2img([visuals['gt']], rgb2bgr=rgb2bgr)
+        #         del self.gt
 
-            # tentative for out of GPU memory
-            del self.lq
-            del self.output
-            torch.cuda.empty_cache()
+        #     # tentative for out of GPU memory
+        #     del self.lq
+        #     del self.output
+        #     torch.cuda.empty_cache()
 
-            if save_img:
-                if sr_img.shape[2] == 6:
-                    L_img = sr_img[:, :, :3]
-                    R_img = sr_img[:, :, 3:]
+        #     if save_img:
+        #         if sr_img.shape[2] == 6:
+        #             L_img = sr_img[:, :, :3]
+        #             R_img = sr_img[:, :, 3:]
 
-                    # visual_dir = osp.join('visual_results', dataset_name, self.opt['name'])
-                    visual_dir = osp.join(self.opt['path']['visualization'], dataset_name)
+        #             # visual_dir = osp.join('visual_results', dataset_name, self.opt['name'])
+        #             visual_dir = osp.join(self.opt['path']['visualization'], dataset_name)
 
-                    imwrite(L_img, osp.join(visual_dir, f'{img_name}_L.png'))
-                    imwrite(R_img, osp.join(visual_dir, f'{img_name}_R.png'))
-                else:
-                    if self.opt['is_train']:
+        #             imwrite(L_img, osp.join(visual_dir, f'{img_name}_L.png'))
+        #             imwrite(R_img, osp.join(visual_dir, f'{img_name}_R.png'))
+        #         else:
+        #             if self.opt['is_train']:
 
-                        save_img_path = osp.join(self.opt['path']['visualization'],
-                                                 img_name,
-                                                 f'{img_name}_{current_iter}.png')
+        #                 save_img_path = osp.join(self.opt['path']['visualization'],
+        #                                          img_name,
+        #                                          f'{img_name}_{current_iter}.png')
 
-                        save_gt_img_path = osp.join(self.opt['path']['visualization'],
-                                                 img_name,
-                                                 f'{img_name}_{current_iter}_gt.png')
-                    else:
-                        save_img_path = osp.join(
-                            self.opt['path']['visualization'], dataset_name,
-                            f'{img_name}.png')
-                        save_gt_img_path = osp.join(
-                            self.opt['path']['visualization'], dataset_name,
-                            f'{img_name}_gt.png')
+        #                 save_gt_img_path = osp.join(self.opt['path']['visualization'],
+        #                                          img_name,
+        #                                          f'{img_name}_{current_iter}_gt.png')
+        #             else:
+        #                 save_img_path = osp.join(
+        #                     self.opt['path']['visualization'], dataset_name,
+        #                     f'{img_name}.png')
+        #                 save_gt_img_path = osp.join(
+        #                     self.opt['path']['visualization'], dataset_name,
+        #                     f'{img_name}_gt.png')
 
-                    imwrite(sr_img, save_img_path)
-                    imwrite(gt_img, save_gt_img_path)
+        #             imwrite(sr_img, save_img_path)
+        #             imwrite(gt_img, save_gt_img_path)
 
-            if with_metrics:
-                # calculate metrics
-                opt_metric = deepcopy(self.opt['val']['metrics'])
-                if use_image:
-                    for name, opt_ in opt_metric.items():
-                        metric_type = opt_.pop('type')
-                        self.metric_results[name] += getattr(
-                            metric_module, metric_type)(sr_img, gt_img, **opt_)
-                else:
-                    for name, opt_ in opt_metric.items():
-                        metric_type = opt_.pop('type')
-                        self.metric_results[name] += getattr(
-                            metric_module, metric_type)(visuals['result'], visuals['gt'], **opt_)
+        #     if with_metrics:
+        #         # calculate metrics
+        #         opt_metric = deepcopy(self.opt['val']['metrics'])
+        #         if use_image:
+        #             for name, opt_ in opt_metric.items():
+        #                 metric_type = opt_.pop('type')
+        #                 self.metric_results[name] += getattr(
+        #                     metric_module, metric_type)(sr_img, gt_img, **opt_)
+        #         else:
+        #             for name, opt_ in opt_metric.items():
+        #                 metric_type = opt_.pop('type')
+        #                 self.metric_results[name] += getattr(
+        #                     metric_module, metric_type)(visuals['result'], visuals['gt'], **opt_)
 
-            cnt += 1
-            if rank == 0:
-                for _ in range(world_size):
-                    pbar.update(1)
-                    pbar.set_description(f'Test {img_name}')
-        if rank == 0:
-            pbar.close()
+        #     cnt += 1
+        #     if rank == 0:
+        #         for _ in range(world_size):
+        #             pbar.update(1)
+        #             pbar.set_description(f'Test {img_name}')
+        # if rank == 0:
+        #     pbar.close()
 
-        # current_metric = 0.
-        collected_metrics = OrderedDict()
-        if with_metrics:
-            for metric in self.metric_results.keys():
-                collected_metrics[metric] = torch.tensor(self.metric_results[metric]).float().to(self.device)
-            collected_metrics['cnt'] = torch.tensor(cnt).float().to(self.device)
+        # # current_metric = 0.
+        # collected_metrics = OrderedDict()
+        # if with_metrics:
+        #     for metric in self.metric_results.keys():
+        #         collected_metrics[metric] = torch.tensor(self.metric_results[metric]).float().to(self.device)
+        #     collected_metrics['cnt'] = torch.tensor(cnt).float().to(self.device)
 
-            self.collected_metrics = collected_metrics
+        #     self.collected_metrics = collected_metrics
 
-        keys = []
-        metrics = []
-        for name, value in self.collected_metrics.items():
-            keys.append(name)
-            metrics.append(value)
-        metrics = torch.stack(metrics, 0)
-        torch.distributed.reduce(metrics, dst=0)
-        if self.opt['rank'] == 0:
-            metrics_dict = {}
-            cnt = 0
-            for key, metric in zip(keys, metrics):
-                if key == 'cnt':
-                    cnt = float(metric)
-                    continue
-                metrics_dict[key] = float(metric)
+        # keys = []
+        # metrics = []
+        # for name, value in self.collected_metrics.items():
+        #     keys.append(name)
+        #     metrics.append(value)
+        # metrics = torch.stack(metrics, 0)
+        # torch.distributed.reduce(metrics, dst=0)
+        # if self.opt['rank'] == 0:
+        #     metrics_dict = {}
+        #     cnt = 0
+        #     for key, metric in zip(keys, metrics):
+        #         if key == 'cnt':
+        #             cnt = float(metric)
+        #             continue
+        #         metrics_dict[key] = float(metric)
 
-            for key in metrics_dict:
-                metrics_dict[key] /= cnt
+        #     for key in metrics_dict:
+        #         metrics_dict[key] /= cnt
 
-            self._log_validation_metric_values(current_iter, dataloader.dataset.opt['name'],
-                                               tb_logger, metrics_dict)
-        return 0.
+        #     self._log_validation_metric_values(current_iter, dataloader.dataset.opt['name'],
+        #                                        tb_logger, metrics_dict)
+        # return 0.
+        return NotImplementedError('Please use nondist_validation for now.')
     
     def nondist_validation(self, dataloader, current_iter, tb_logger, save_img, rgb2bgr, use_image):
         dataset_name = dataloader.dataset.opt['name']
@@ -533,7 +509,19 @@ class E2ECompressedSensing(BaseModel):
     def get_current_visuals(self):
         out_dict = OrderedDict()
         out_dict['lq'] = self.lq.detach().cpu()
+        # Compression matrix
+        A = self.frontend.get_matrix()
+        out_dict['A'] = A.detach().cpu() if hasattr(A, 'detach') else torch.tensor(A).cpu()
+        # Compressed Ax (use frontend's get_compressed for consistency)
+        with torch.no_grad():
+            Ax = self.frontend.get_compressed(self.lq)
+        out_dict['Ax'] = Ax.detach().cpu()
+        # Upsampled x
+        x_upsample = self.frontend(self.lq)
+        out_dict['x_upsample'] = x_upsample.detach().cpu()
+        # Result from net_g
         out_dict['result'] = self.output.detach().cpu()
+        # Ground truth
         if hasattr(self, 'gt'):
             out_dict['gt'] = self.gt.detach().cpu()
         return out_dict
