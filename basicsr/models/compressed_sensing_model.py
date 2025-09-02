@@ -86,22 +86,10 @@ class E2ECompressedSensing(BaseModel):
 
         for k, v in self.net_g.named_parameters():
             if v.requires_grad:
-        #         if k.startswith('module.offsets') or k.startswith('module.dcns'):
-        #             optim_params_lowlr.append(v)
-        #         else:
                 optim_params.append(v)
-            # else:
-            #     logger = get_root_logger()
-            #     logger.warning(f'Params {k} will not be optimized.')
-        # print(optim_params)
-        # ratio = 0.1
-
-        # if getattr(self.net_g, 'use_compression', False):
-        #     cs_params = list(self.net_g.cs_matrix.parameters())
-        #     existing_ids = set(id(p) for p in optim_params)
-        #     for p in cs_params:
-        #         if id(p) not in existing_ids:
-        #             optim_params.append(p)
+        for k, v in self.frontend.named_parameters():
+            if v.requires_grad:
+                optim_params.append(v)
 
         optim_type = train_opt['optim_g'].pop('type')
         if optim_type == 'Adam':
