@@ -59,7 +59,6 @@ network_g:
   enc_blk_nums: [1, 1, 1, 28]
   middle_blk_num: 1
   dec_blk_nums: [1, 1, 1, 1]
-  num_input_channels: 128
 
 compression:
   matrix_init: blocksum         # Options: blocksum, blockwise_random, fully_random, naive

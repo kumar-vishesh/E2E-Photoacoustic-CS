@@ -81,7 +81,7 @@ def tensor2img(tensor, rgb2bgr=True, out_type=np.uint8, min_max=(0, 1), auto_res
             else:
                 _tensor = torch.zeros_like(_tensor)
         else:
-            _tensor = _tensor.clamp_(*min_max)
+            _tensor = _tensor.clamp(*min_max)
             _tensor = (_tensor - min_max[0]) / (min_max[1] - min_max[0])
         n_dim = _tensor.dim()
         if n_dim == 4:

@@ -42,10 +42,15 @@ class E2ECompressedSensing(BaseModel):
         self.frontend = CSFrontend(comp_cfg).to(self.device)
 
         # load pretrained models
-        load_path = self.opt['path'].get('pretrain_network_g', None)
+        paths = self.opt.get('path', {})
+        load_path = paths.get('pretrain_network_g', None)  # keep same YAML key
         if load_path is not None:
-            self.load_network(self.net_g, load_path,
-                              self.opt['path'].get('strict_load_g', True), param_key=self.opt['path'].get('param_key', 'params'))
+            self._load_weights(
+                load_path,
+                strict_g=paths.get('strict_load_g', True),
+                strict_fe=paths.get('strict_load_fe', True)
+            )
+
 
         if self.is_train:
             self.init_training_settings()
@@ -54,6 +59,7 @@ class E2ECompressedSensing(BaseModel):
 
     def init_training_settings(self):
         self.net_g.train()
+        self.frontend.train()
         train_opt = self.opt['train']
 
         # define losses
@@ -192,6 +198,25 @@ class E2ECompressedSensing(BaseModel):
         self.output = (preds / count_mt).to(self.device)
         self.lq = self.origin_lq
 
+    def _pack_weights(self):
+        return {
+            "net_g": self.net_g.state_dict(),
+            "frontend": self.frontend.state_dict(),
+        }
+
+    def _load_weights(self, path, strict_g=True, strict_fe=True):
+        ckpt = torch.load(path, map_location="cpu")
+        if not (isinstance(ckpt, dict) and "net_g" in ckpt and "frontend" in ckpt):
+            raise RuntimeError(
+                f"Unified checkpoint expected with keys ['net_g','frontend'], got keys: {list(ckpt.keys())}"
+            )
+        mg, ug = self.net_g.load_state_dict(ckpt["net_g"], strict=strict_g)
+        mf, uf = self.frontend.load_state_dict(ckpt["frontend"], strict=strict_fe)
+        if mg or ug or mf or uf:
+            print("[load] net_g missing:", mg, "unexpected:", ug,
+                "| frontend missing:", mf, "unexpected:", uf)
+
+
     def optimize_parameters(self, current_iter, tb_logger):
         self.optimizer_g.zero_grad()
 
@@ -233,13 +258,16 @@ class E2ECompressedSensing(BaseModel):
         l_total.backward()
         use_grad_clip = self.opt['train'].get('use_grad_clip', True)
         if use_grad_clip:
-            torch.nn.utils.clip_grad_norm_(self.net_g.parameters(), 0.01)
+            for group in self.optimizer_g.param_groups:
+                torch.nn.utils.clip_grad_norm_(group['params'], 0.01)
+
         self.optimizer_g.step()
 
         self.log_dict = self.reduce_loss_dict(loss_dict)
 
     def test(self):
         self.net_g.eval()
+        self.frontend.eval()
         with torch.no_grad():
             n = len(self.lq)
             outs = []
@@ -261,134 +289,7 @@ class E2ECompressedSensing(BaseModel):
 
             self.output = torch.cat(outs, dim=0)
         self.net_g.train()
-
-
-    def dist_validation(self, dataloader, current_iter, tb_logger, save_img, rgb2bgr, use_image):
-        # dataset_name = dataloader.dataset.opt['name']
-        # with_metrics = self.opt['val'].get('metrics') is not None
-        # if with_metrics:
-        #     self.metric_results = {
-        #         metric: 0
-        #         for metric in self.opt['val']['metrics'].keys()
-        #     }
-
-        # rank, world_size = get_dist_info()
-        # if rank == 0:
-        #     pbar = tqdm(total=len(dataloader), unit='image')
-
-        # cnt = 0
-
-        # for idx, val_data in enumerate(dataloader):
-        #     if idx % world_size != rank:
-        #         continue
-
-        #     img_name = osp.splitext(osp.basename(val_data['lq_path'][0]))[0]
-
-        #     self.feed_data(val_data, is_val=True)
-        #     if self.opt['val'].get('grids', False):
-        #         self.grids()
-
-        #     self.test()
-
-        #     if self.opt['val'].get('grids', False):
-        #         self.grids_inverse()
-
-        #     visuals = self.get_current_visuals()
-        #     sr_img = tensor2img([visuals['result']], rgb2bgr=rgb2bgr)
-        #     if 'gt' in visuals:
-        #         gt_img = tensor2img([visuals['gt']], rgb2bgr=rgb2bgr)
-        #         del self.gt
-
-        #     # tentative for out of GPU memory
-        #     del self.lq
-        #     del self.output
-        #     torch.cuda.empty_cache()
-
-        #     if save_img:
-        #         if sr_img.shape[2] == 6:
-        #             L_img = sr_img[:, :, :3]
-        #             R_img = sr_img[:, :, 3:]
-
-        #             # visual_dir = osp.join('visual_results', dataset_name, self.opt['name'])
-        #             visual_dir = osp.join(self.opt['path']['visualization'], dataset_name)
-
-        #             imwrite(L_img, osp.join(visual_dir, f'{img_name}_L.png'))
-        #             imwrite(R_img, osp.join(visual_dir, f'{img_name}_R.png'))
-        #         else:
-        #             if self.opt['is_train']:
-
-        #                 save_img_path = osp.join(self.opt['path']['visualization'],
-        #                                          img_name,
-        #                                          f'{img_name}_{current_iter}.png')
-
-        #                 save_gt_img_path = osp.join(self.opt['path']['visualization'],
-        #                                          img_name,
-        #                                          f'{img_name}_{current_iter}_gt.png')
-        #             else:
-        #                 save_img_path = osp.join(
-        #                     self.opt['path']['visualization'], dataset_name,
-        #                     f'{img_name}.png')
-        #                 save_gt_img_path = osp.join(
-        #                     self.opt['path']['visualization'], dataset_name,
-        #                     f'{img_name}_gt.png')
-
-        #             imwrite(sr_img, save_img_path)
-        #             imwrite(gt_img, save_gt_img_path)
-
-        #     if with_metrics:
-        #         # calculate metrics
-        #         opt_metric = deepcopy(self.opt['val']['metrics'])
-        #         if use_image:
-        #             for name, opt_ in opt_metric.items():
-        #                 metric_type = opt_.pop('type')
-        #                 self.metric_results[name] += getattr(
-        #                     metric_module, metric_type)(sr_img, gt_img, **opt_)
-        #         else:
-        #             for name, opt_ in opt_metric.items():
-        #                 metric_type = opt_.pop('type')
-        #                 self.metric_results[name] += getattr(
-        #                     metric_module, metric_type)(visuals['result'], visuals['gt'], **opt_)
-
-        #     cnt += 1
-        #     if rank == 0:
-        #         for _ in range(world_size):
-        #             pbar.update(1)
-        #             pbar.set_description(f'Test {img_name}')
-        # if rank == 0:
-        #     pbar.close()
-
-        # # current_metric = 0.
-        # collected_metrics = OrderedDict()
-        # if with_metrics:
-        #     for metric in self.metric_results.keys():
-        #         collected_metrics[metric] = torch.tensor(self.metric_results[metric]).float().to(self.device)
-        #     collected_metrics['cnt'] = torch.tensor(cnt).float().to(self.device)
-
-        #     self.collected_metrics = collected_metrics
-
-        # keys = []
-        # metrics = []
-        # for name, value in self.collected_metrics.items():
-        #     keys.append(name)
-        #     metrics.append(value)
-        # metrics = torch.stack(metrics, 0)
-        # torch.distributed.reduce(metrics, dst=0)
-        # if self.opt['rank'] == 0:
-        #     metrics_dict = {}
-        #     cnt = 0
-        #     for key, metric in zip(keys, metrics):
-        #         if key == 'cnt':
-        #             cnt = float(metric)
-        #             continue
-        #         metrics_dict[key] = float(metric)
-
-        #     for key in metrics_dict:
-        #         metrics_dict[key] /= cnt
-
-        #     self._log_validation_metric_values(current_iter, dataloader.dataset.opt['name'],
-        #                                        tb_logger, metrics_dict)
-        # return 0.
-        return NotImplementedError('Please use nondist_validation for now.')
+        self.frontend.train()
     
     def nondist_validation(self, dataloader, current_iter, tb_logger, save_img, rgb2bgr, use_image):
         dataset_name = dataloader.dataset.opt['name']
@@ -503,48 +404,29 @@ class E2ECompressedSensing(BaseModel):
         # Compressed Ax (use frontend's get_compressed for consistency)
         with torch.no_grad():
             Ax = self.frontend.get_compressed(self.lq)
+            x_upsample = self.frontend(self.lq)
+        
         out_dict['Ax'] = Ax.detach().cpu()
-        # Upsampled x
-        x_upsample = self.frontend(self.lq)
         out_dict['x_upsample'] = x_upsample.detach().cpu()
-        # Result from net_g
         out_dict['result'] = self.output.detach().cpu()
+
         # Ground truth
         if hasattr(self, 'gt'):
             out_dict['gt'] = self.gt.detach().cpu()
         return out_dict
 
     def save(self, epoch, current_iter):
-        is_best_model = isinstance(current_iter, str) and current_iter.startswith("best_model")
-
-        # Set directory for best or regular model saves
-        if is_best_model:
-            save_dir = os.path.join(self.opt['path']['models'], 'best_models')
-        else:
-            save_dir = self.opt['path']['models']
-
+        is_best = isinstance(current_iter, str) and current_iter.startswith("best_model")
+        save_dir = os.path.join(self.opt['path']['models'], 'best_models') if is_best else self.opt['path']['models']
         os.makedirs(save_dir, exist_ok=True)
-        self.save_network(self.net_g, 'net_g', current_iter, save_dir=save_dir)
 
-        # Save training state only for non-best models
-        if not is_best_model:
+        stem = f"{current_iter}" if is_best else f"model_{current_iter}"
+        weights_path = osp.join(save_dir, f"{stem}.pth")
+        torch.save(self._pack_weights(), weights_path)
+
+        if not is_best:
             self.save_training_state(epoch, current_iter)
 
-        # Save compression matrix (remains in experiments_root)
-        if getattr(self.net_g, 'use_compression', False):
-            A = self.net_g.cs_matrix.A.detach().cpu().numpy()
-            comp_save_dir = self.opt['path']['experiments_root']
-            np.save(osp.join(comp_save_dir, 'compression_matrix.npy'), A)
-
-            plt.figure(figsize=(6, 5))
-            im = plt.imshow(A, aspect='auto', cmap='viridis')
-            plt.colorbar(im, shrink=0.8)
-            plt.title("Learned Compression Matrix A")
-            plt.xlabel("Original Channels")
-            plt.ylabel("Compressed Channels")
-            plt.tight_layout()
-            plt.savefig(osp.join(comp_save_dir, 'compression_matrix.png'), dpi=300)
-            plt.close()
 
 
 
@@ -559,7 +441,7 @@ class E2ECompressedSensing(BaseModel):
         pixel_counts = {name: 0 for name in metrics_cfg}
 
         with torch.no_grad():
-            for data in tqdm(dataloader, desc='[Eval]', unit='img'):
+            for data in tqdm(dataloader, desc='[Eval]', unit='batches'):
                 self.feed_data(data, is_val=True)
                 self.test()
 
