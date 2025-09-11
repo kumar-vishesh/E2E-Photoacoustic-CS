@@ -15,9 +15,9 @@ Corrections implemented:
 # ============================
 # #### FILL IN PATHS BELOW ####
 # ============================
-CHECKPOINT_PATH = "/home/vk38/E2E-Photoacoustic-CS/experiments/Blocksum_8x_L1_025_learned_upsampler/models/best_models/net_g_best_model_epoch_62.pth"  # <-- your .pth
+CHECKPOINT_PATH = "experiments/LearnedA_8x_L1_025_learned_upsampler/models/best_models/best_model_epoch_171.pth"  # <-- .pth
 DATASET_DIR     = "/home/vk38/E2E-Photoacoustic-CS/datasets/Experimental/visualization"  # <-- folder for the test set
-OUTPUT_DIR      = "tmp/fix_matrix_learn_up"  # where .npy files will be written
+OUTPUT_DIR      = "tmp/learn_matrix_learn_up"  # where .npy files will be written
 
 # If your repo isn’t already on PYTHONPATH, uncomment:
 # import sys; sys.path.append("/home/vk38/E2E-Photoacoustic-CS")
@@ -92,13 +92,12 @@ def build_opt(checkpoint_path: str, dataset_dir: str) -> dict:
             'width': 32,
             'enc_blk_nums': [1, 1, 1, 28],
             'middle_blk_num': 1,
-            'dec_blk_nums': [1, 1, 1, 1],
-            'num_input_channels': 128,
+            'dec_blk_nums': [1, 1, 1, 1]
         },
 
         'compression': {
             'matrix_init': 'blocksum',
-            'matrix_learned': 'fixed',
+            'matrix_learned': 'learned',
             'compression_factor': 8,
             'input_size': 128,
             'upsampler': 'learned',
