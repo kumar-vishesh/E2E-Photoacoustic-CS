@@ -2,7 +2,7 @@
 # E2E Compressed Sensing Config for NAFNet Backbone
 # ------------------------------------------------------------------------
 
-name: Blocksum_8x_L1_025_pinv_upsampler
+name: Blocksum_8x_L1_05_pinv_upsampler
 model_type: E2ECompressedSensing
 scale: 1
 num_gpu: 1
@@ -13,9 +13,9 @@ datasets:
     name: synthetic-train
     type: UncompressedNpyDataset
     target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/Synthetic/25x_Averaged/Original/data_split/train
-    upsample_type: learned
+    upsample_type: pinv
     normalize: true
-    noise_std: 0.025
+    noise_std: 0.05
     reshape_to_image: true
     num_worker_per_gpu: 1
     batch_size_per_gpu: 8
@@ -28,9 +28,9 @@ datasets:
     name: synthetic-val
     type: UncompressedNpyDataset
     target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/Synthetic/25x_Averaged/Original/data_split/val
-    upsample_type: learned
+    upsample_type: pinv
     normalize: true
-    noise_std: 0.025
+    noise_std: 0.05
     reshape_to_image: true
     num_worker_per_gpu: 1
     batch_size_per_gpu: 100
@@ -42,7 +42,7 @@ datasets:
     name: experimental-test
     type: UncompressedNpyDataset
     target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/Experimental/forearm/
-    upsample_type: learned
+    upsample_type: pinv
     normalize: true
     noise_std: 0.00
     reshape_to_image: true

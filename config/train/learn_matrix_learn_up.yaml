@@ -2,7 +2,7 @@
 # E2E Compressed Sensing Config for NAFNet Backbone
 # ------------------------------------------------------------------------
 
-name: LearnedA_8x_L1_025_learned_upsampler
+name: LearnedA_8x_L1_05_learned_upsampler
 model_type: E2ECompressedSensing
 scale: 1
 num_gpu: 1
@@ -15,7 +15,7 @@ datasets:
     target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/Synthetic/25x_Averaged/Original/data_split/train
     upsample_type: learned
     normalize: true
-    noise_std: 0.025
+    noise_std: 0.05
     reshape_to_image: true
     num_worker_per_gpu: 1
     batch_size_per_gpu: 8
@@ -30,7 +30,7 @@ datasets:
     target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/Synthetic/25x_Averaged/Original/data_split/val
     upsample_type: learned
     normalize: true
-    noise_std: 0.025
+    noise_std: 0.05
     reshape_to_image: true
     num_worker_per_gpu: 1
     batch_size_per_gpu: 100
