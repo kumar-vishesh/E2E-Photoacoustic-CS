@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 """
 Dump input/output pairs (.npy) for your E2ECompressedSensing + NAFNet model.
 Optional: also compute metrics using model.epoch_summary (same as your training flow).
@@ -15,12 +12,9 @@ Corrections implemented:
 # ============================
 # #### FILL IN PATHS BELOW ####
 # ============================
-CHECKPOINT_PATH = "experiments/LearnedA_8x_L1_025_learned_upsampler/models/best_models/best_model_epoch_171.pth"  # <-- .pth
+CHECKPOINT_PATH = "experiments/Blocksum_8x_L1_05_pinv_upsampler/models/best_models/best_model_epoch_53.pth"  # <-- .pth
 DATASET_DIR     = "/home/vk38/E2E-Photoacoustic-CS/datasets/Experimental/visualization"  # <-- folder for the test set
-OUTPUT_DIR      = "tmp/learn_matrix_learn_up"  # where .npy files will be written
-
-# If your repo isn’t already on PYTHONPATH, uncomment:
-# import sys; sys.path.append("/home/vk38/E2E-Photoacoustic-CS")
+OUTPUT_DIR      = "tmp/fix_matrix_fix_up_05"  # where .npy files will be written
 
 # ============================
 # No changes needed below
@@ -74,7 +68,6 @@ def build_opt(checkpoint_path: str, dataset_dir: str) -> dict:
                 'name': 'experimental-test',
                 'type': 'UncompressedNpyDataset',
                 'target_dir': dataset_dir,
-                'upsample_type': 'learned',
                 'normalize': True,
                 'noise_std': 0.00,
                 'reshape_to_image': True,
@@ -97,10 +90,10 @@ def build_opt(checkpoint_path: str, dataset_dir: str) -> dict:
 
         'compression': {
             'matrix_init': 'blocksum',
-            'matrix_learned': 'learned',
+            'matrix_learned': 'fixed',
             'compression_factor': 8,
             'input_size': 128,
-            'upsampler': 'learned',
+            'upsampler': 'pinv',
         },
 
         'path': {
