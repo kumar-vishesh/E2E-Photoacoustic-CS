@@ -1,9 +1,9 @@
 # ------------------------------------------------------------------------
-# Custom NAFNet Config for On-the-Fly Compressed Synthetic Dataset
+# E2E Compressed Sensing Config for NAFNet Backbone
 # ------------------------------------------------------------------------
 
-name: Testing_8x_L1_025_TGC_70dB
-model_type: ImageRestorationModel
+name: Blocksum_8x_L1_025_DirectionalResponse_TGC_0.5_ Learned_Matrix_Random
+model_type: E2ECompressedSensing
 scale: 1
 num_gpu: 1
 mixed_precision: true
@@ -12,8 +12,8 @@ datasets:
   train:
     name: synthetic-train
     type: UncompressedNpyDataset
-    target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/Synthetic/25x_Averaged/Original/data_split/train
-    upsample_type: learned
+    target_dir: /rhf/vk38/25x_Dataset/Dataset/train
+    upsample_type: pinv
     normalize: true
     noise_std: 0.025
     reshape_to_image: true
@@ -23,13 +23,12 @@ datasets:
     phase: train
     pin_memory: true
     save_debug_data: true
-    
 
   val:
     name: synthetic-val
     type: UncompressedNpyDataset
-    target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/Synthetic/25x_Averaged/Original/data_split/val
-    upsample_type: learned
+    target_dir: /rhf/vk38/25x_Dataset/Dataset/val
+    upsample_type: pinv
     normalize: true
     noise_std: 0.025
     reshape_to_image: true
@@ -38,12 +37,12 @@ datasets:
     use_shuffle: false
     phase: val
     save_debug_data: true
-  
+
   test:
     name: experimental-test
     type: UncompressedNpyDataset
     target_dir: /home/vk38/E2E-Photoacoustic-CS/datasets/Experimental/forearm/
-    upsample_type: learned
+    upsample_type: pinv
     normalize: true
     noise_std: 0.00
     reshape_to_image: true
@@ -53,24 +52,21 @@ datasets:
     phase: test
     save_debug_data: true
 
-
 network_g:
-  type: CS_NAFNet
+  type: NAFNet
   img_channel: 1
   width: 32
   enc_blk_nums: [1, 1, 1, 28]
   middle_blk_num: 1
   dec_blk_nums: [1, 1, 1, 1]
-  num_input_channels: 128
-  compression_ratio: 8
 
-# Compressed Sensing parameters
-# These parameters are used to simulate the compressed sensing scenario
-# cs:
-#   type: BlockSum # Options: BlockSum, Naive, Blockwise_Random, Fully_Random, Learned
-#   num_input_channels: 128
-#   compression_ratio: 8
-#   upsampler: learned  # Options: Learned, Nearest, Bilinear, Pinv
+compression:
+  matrix_init: blockwise_random         # Options: blocksum, blockwise_random, fully_random, naive
+  matrix_learned: learned       # Options: fixed, learned
+  compression_factor: 8
+  input_size: 128
+  upsampler: pinv               # Options: pinv, learned, bilinear
+  # Optionally: A_path: /path/to/precomputed/matrix.npy
 
 path:
   root: /home/vk38/E2E-Photoacoustic-CS/
@@ -96,12 +92,11 @@ train:
   warmup_iter: -1
 
   pixel_opt:
-    type: L1Loss
+    type: TGCMetric
     loss_weight: 1
     reduction: mean
-  
-gain_weight: 0.2625  # Gain weight in dB per pixel, e.g., 0.2625 for 70 dB over 267 pixels
 
+# gain_weight: 0.2625  # Gain weight in dB per pixel, e.g., 0.2625 for 70 dB over 267 pixels
 
 val:
   val_freq: !!float 1e4
@@ -141,9 +136,6 @@ logger:
    save_checkpoint_freq: !!float 1e4
    use_tb_logger: false
    use_wandb: false
-#   wandb:
-#     project: ~
-#     resume_id: ~
 
 dist_params:
   backend: nccl

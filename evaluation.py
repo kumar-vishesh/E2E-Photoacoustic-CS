@@ -12,9 +12,9 @@ Corrections implemented:
 # ============================
 # #### FILL IN PATHS BELOW ####
 # ============================
-CHECKPOINT_PATH = "experiments/Blocksum_8x_L1_05_pinv_upsampler/models/best_models/best_model_epoch_53.pth"  # <-- .pth
-DATASET_DIR     = "/home/vk38/E2E-Photoacoustic-CS/datasets/Experimental/visualization"  # <-- folder for the test set
-OUTPUT_DIR      = "tmp/fix_matrix_fix_up_05"  # where .npy files will be written
+CHECKPOINT_PATH = "experiments/LearnedA_8x_L1_025_pinv_upsampler/models/best_models/best_model_epoch_156.pth"  # <-- .pth
+DATASET_DIR     = "datasets/Experimental/visualization"
+OUTPUT_DIR      = "tmp/old_dataset/learn_matrix_fix_up"
 
 # ============================
 # No changes needed below
@@ -90,7 +90,7 @@ def build_opt(checkpoint_path: str, dataset_dir: str) -> dict:
 
         'compression': {
             'matrix_init': 'blocksum',
-            'matrix_learned': 'fixed',
+            'matrix_learned': 'learned',
             'compression_factor': 8,
             'input_size': 128,
             'upsampler': 'pinv',
@@ -129,7 +129,7 @@ def build_opt(checkpoint_path: str, dataset_dir: str) -> dict:
         'dist': False,
         'rank': 0,
         'world_size': 1,
-        'manual_seed': 1234,
+        'manual_seed': 42,
     }
 
 
