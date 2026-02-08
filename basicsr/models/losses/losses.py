@@ -8,7 +8,7 @@ import torch
 from torch import nn as nn
 from torch.nn import functional as F
 import numpy as np
-
+from basicsr.models.losses.beamformers import DifferentiableStolt
 from basicsr.models.losses.loss_util import weighted_loss
 
 _reduction_modes = ['none', 'mean', 'sum']
@@ -141,11 +141,6 @@ class SmoothL1Loss(nn.Module):
         return self.loss_weight * smooth_l1_loss(
             pred, target, weight, reduction=self.reduction)
     
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
-
 class TGCMetric(nn.Module):
     """
     Time Gain Compensation (TGC) Metric Loss.
@@ -153,7 +148,7 @@ class TGCMetric(nn.Module):
     compensation along the time axis.
     """
 
-    def __init__(self, loss_weight, tgc_weight=0.5, size=1024, resolution=0.0375, reduction='mean'):
+    def __init__(self, loss_weight, tgc_weight=0.3, size=1024, resolution=0.0375, reduction='mean'):
         super(TGCMetric, self).__init__()
         
         self.loss_weight = loss_weight
@@ -172,7 +167,7 @@ class TGCMetric(nn.Module):
 
         # 3. Geometric Spreading Component (Linear-in-Time)
         # Compensation for 1/z decay is simply multiplying by z
-        geometric_gain = z
+        geometric_gain = z # techinically units of mm, but relative scaling is what matters
 
         # 4. Combined Weights
         # Total Gain = z * e^(alpha * z)
@@ -194,12 +189,114 @@ class TGCMetric(nn.Module):
         loss = F.l1_loss(pred_tgc, target_tgc, reduction=self.reduction)
 
         return self.loss_weight * loss
+
+class BeamformedL1Loss(nn.Module):
+    """
+    Beamformed L1 Loss.
+    
+    This loss function takes raw sensor data (prediction), beamforms it using 
+    differentiable Stolt migration, and computes the L1 loss against a 
+    pre-beamformed ground truth image (or beamforms the GT raw data on the fly).
+    
+    Args:
+        loss_weight (float): Weight of this loss term. Default: 1.0.
+        reduction (str): Reduction mode: 'none', 'mean', 'sum'. Default: 'mean'.
+        beamformer_params (dict): Dictionary of parameters for the StoltBeamformer.
+        target_is_raw (bool): If True, assumes 'target' is raw sensor data and needs 
+                              beamforming. If False, assumes 'target' is already a 
+                              beamformed image. Default: False.
+    """
+
+    def __init__(self, 
+                 loss_weight=1.0, 
+                 reduction='mean', 
+                 beamformer_params=None, 
+                 target_is_raw=True):
+        super(BeamformedL1Loss, self).__init__()
         
-# if __name__ == '__main__':
-#     # Example usage
-#     tgc_loss = TGCMetric(loss_weight=1.0, tgc_weight=0.2, size=1024, resolution=0.0375, reduction='mean')
-#     mse = MSELoss()
-#     pred = torch.ones(8, 1, 128, 1024)
-#     target = torch.zeros(8, 1, 128, 1024)
-#     print('TGC Metric Loss:', tgc_loss(pred, target).item())
-#     print('MSE Loss:', mse(pred, target).item())
+        if reduction not in ['none', 'mean', 'sum']:
+            raise ValueError(f'Unsupported reduction mode: {reduction}.')
+
+        self.loss_weight = loss_weight
+        self.reduction = reduction
+        self.target_is_raw = target_is_raw
+
+        # Default Beamformer Parameters
+        default_params = {
+            'F': 40e6,
+            'pitch': 3.125e-4,
+            'c': 1500.0,
+            'samplingX': 8,
+            'coeffT': 5,
+            'zeroX': True,
+            'zeroT': True
+        }
+        
+        # Update defaults with provided params
+        if beamformer_params is not None:
+            default_params.update(beamformer_params)
+            
+        # Instantiate the Differentiable Beamformer
+        self.beamformer = DifferentiableStolt(**default_params)
+
+    def forward(self, pred, target, weight=None, **kwargs):
+        """
+        Args:
+            pred (Tensor): Predicted raw sensor data. 
+                           Shape: (N, 1, Time, Channels) or (N, Time, Channels).
+            target (Tensor): Ground truth. 
+                             If target_is_raw=True: Shape matches pred.
+                             If target_is_raw=False: Shape is (N, Time, Channels) (Beamformed Image).
+            weight (Tensor, optional): Element-wise weights. Default: None.
+        """
+        
+        # 1. Beamform the prediction (Sensor Data -> Image Domain)
+        # Note: If input is (N, 1, T, C), beamformer handles the squeeze internally
+        pred_img = self.beamformer(pred)
+
+        # 2. Prepare the target
+        if self.target_is_raw:
+            # If target is also raw data, beamform it to compare in image domain
+            with torch.no_grad():
+                target_img = self.beamformer(target)
+        else:
+            # Target is already an image
+            target_img = target
+
+        # Ensure shapes match after beamforming
+        # pred_img shape will be (Batch, Time, Channels)
+        # If target was (Batch, 1, Time, Channels) image, squeeze it
+        if target_img.ndim == 4 and target_img.shape[1] == 1:
+            target_img = target_img.squeeze(1)
+
+        # 3. Compute L1 Loss
+        loss = F.l1_loss(pred_img, target_img, reduction='none')
+        
+        # Apply weights if provided
+        if weight is not None:
+            # Ensure weight shape aligns
+            if weight.ndim == 4 and weight.shape[1] == 1:
+                weight = weight.squeeze(1)
+            loss = loss * weight
+
+        # 4. Reduction
+        if self.reduction == 'sum':
+            loss = torch.sum(loss)
+        elif self.reduction == 'mean':
+            loss = torch.mean(loss)
+
+        return self.loss_weight * loss
+        
+if __name__ == '__main__':
+    # Example usage
+    tgc_loss = TGCMetric(loss_weight=1.0, tgc_weight=0.5, size=1024, resolution=0.0375, reduction='mean')
+    mse = MSELoss()
+    pred = torch.tensor(np.load('datasets/Experimental/visualization/back_hand_corrected.npy')).unsqueeze(0).unsqueeze(0).float()
+    target = torch.zeros(1, 1, 128, 1024)
+    loss, corrected_target = tgc_loss(pred, target)
+    print('TGC Metric Loss:', loss.item())
+    print('MSE Loss:', mse(pred, target).item())
+    import matplotlib.pyplot as plt
+    plt.imsave('original_pred.png', pred.squeeze().cpu().numpy(), cmap='gray')
+    plt.imsave('corrected_target.png', corrected_target.squeeze().cpu().numpy(), cmap='gray')
+    print('Corrected target saved as corrected_target.png and original prediction as original_pred.png')

@@ -4,8 +4,8 @@
 # Modified from BasicSR (https://github.com/xinntao/BasicSR)
 # Copyright 2018-2020 BasicSR Authors
 # ------------------------------------------------------------------------
-from .losses import (L1Loss, MSELoss, PSNRLoss, SmoothL1Loss, TGCMetric)
+from .losses import (L1Loss, MSELoss, PSNRLoss, SmoothL1Loss, TGCMetric, BeamformedL1Loss)
 
 __all__ = [
-    'L1Loss', 'MSELoss', 'PSNRLoss', 'SmoothL1Loss', 'TGCMetric'
+    'L1Loss', 'MSELoss', 'PSNRLoss', 'SmoothL1Loss', 'TGCMetric', 'BeamformedL1Loss'
 ]

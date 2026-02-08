@@ -2,7 +2,7 @@
 # E2E Compressed Sensing Config for NAFNet Backbone
 # ------------------------------------------------------------------------
 
-name: Blocksum_8x_L1_025_DirectionalResponse_TGC_0.5_ Learned_Matrix_Random
+name: Blocksum_8x_BeamformedL1_025_DirectionalResponse_Restormer
 model_type: E2ECompressedSensing
 scale: 1
 num_gpu: 1
@@ -33,7 +33,7 @@ datasets:
     noise_std: 0.025
     reshape_to_image: true
     num_worker_per_gpu: 1
-    batch_size_per_gpu: 100
+    batch_size_per_gpu: 50
     use_shuffle: false
     phase: val
     save_debug_data: true
@@ -47,22 +47,36 @@ datasets:
     noise_std: 0.00
     reshape_to_image: true
     num_worker_per_gpu: 1
-    batch_size_per_gpu: 100
+    batch_size_per_gpu: 50
     use_shuffle: false
     phase: test
     save_debug_data: true
 
+# network_g:
+#   type: NAFNet
+#   img_channel: 1
+#   width: 32
+#   enc_blk_nums: [1, 1, 1, 28]
+#   middle_blk_num: 1
+#   dec_blk_nums: [1, 1, 1, 1]
+
+# network structures
 network_g:
-  type: NAFNet
-  img_channel: 1
-  width: 32
-  enc_blk_nums: [1, 1, 1, 28]
-  middle_blk_num: 1
-  dec_blk_nums: [1, 1, 1, 1]
+  type: Restormer
+  inp_channels: 1
+  out_channels: 1
+  dim: 32                    # Reduced from 48 (Major memory saver)
+  num_blocks: [2, 4, 4, 6]   # Reduced from [4, 6, 6, 8]
+  num_refinement_blocks: 2   # Reduced from 4
+  heads: [1, 2, 4, 8]        # Kept same (compatible with dim=32)
+  ffn_expansion_factor: 2.0  # Reduced from 2.66 (Saves FFN memory)
+  bias: False
+  LayerNorm_type: WithBias
+  dual_pixel_task: False
 
 compression:
-  matrix_init: blockwise_random         # Options: blocksum, blockwise_random, fully_random, naive
-  matrix_learned: learned       # Options: fixed, learned
+  matrix_init: blocksum       # Options: blocksum, blockwise_random, fully_random, naive, gaussian(note this doesn't satisfy out harware params)
+  matrix_learned: fixed      # Options: fixed, learned
   compression_factor: 8
   input_size: 128
   upsampler: pinv               # Options: pinv, learned, bilinear
@@ -92,7 +106,7 @@ train:
   warmup_iter: -1
 
   pixel_opt:
-    type: TGCMetric
+    type: BeamformedL1Loss
     loss_weight: 1
     reduction: mean
 

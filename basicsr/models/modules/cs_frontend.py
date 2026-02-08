@@ -6,7 +6,7 @@
 import torch
 import torch.nn as nn
 from basicsr.models.modules.Learned_Upsampler import Learned_Upsampler
-
+import math
 
 class CSFrontend(nn.Module):
     """
@@ -58,6 +58,10 @@ class CSFrontend(nn.Module):
             mat = torch.zeros((num_blocks, num_channels))
             for i in range(num_blocks):
                 mat[i, i * k] = 1.0
+        elif matrix_type == "gaussian":
+            mat = torch.randn((num_blocks, num_channels)) * (1.0 / math.sqrt(num_channels / k))
+        elif matrix_type == "bernoulli":
+            mat = (torch.randint(2, (num_blocks, num_channels)) * 2 - 1).float()
         else:
             raise ValueError(f"Unknown matrix type: {self.matrix_init}")
 

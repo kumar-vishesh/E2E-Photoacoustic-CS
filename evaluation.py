@@ -1,5 +1,5 @@
 """
-Dump input/output pairs (.npy) for your E2ECompressedSensing + NAFNet model.
+Dump input/output pairs (.npy) for your E2ECompressedSensing + Restormer model.
 Optional: also compute metrics using model.epoch_summary (same as your training flow).
 
 Corrections implemented:
@@ -12,9 +12,9 @@ Corrections implemented:
 # ============================
 # #### FILL IN PATHS BELOW ####
 # ============================
-CHECKPOINT_PATH = "experiments/LearnedA_8x_L1_025_pinv_upsampler/models/best_models/best_model_epoch_156.pth"  # <-- .pth
+CHECKPOINT_PATH = "experiments/Bernoulli_8x_BeamformedL1_025_DirectionalResponse/models/best_models/best_model_epoch_188.pth"  # <-- .pth
 DATASET_DIR     = "datasets/Experimental/visualization"
-OUTPUT_DIR      = "tmp/old_dataset/learn_matrix_fix_up"
+OUTPUT_DIR      = "tmp/new_dataset/fix_matrix_BeamformedLoss_Bernoulli"
 
 # ============================
 # No changes needed below
@@ -88,9 +88,23 @@ def build_opt(checkpoint_path: str, dataset_dir: str) -> dict:
             'dec_blk_nums': [1, 1, 1, 1]
         },
 
+        # 'network_g': {
+        #     'type': 'Restormer',
+        #     'inp_channels': 1,
+        #     'out_channels': 1,
+        #     'dim': 32,                    # Reduced from 48 (Major memory saver)
+        #     'num_blocks': [2, 4, 4, 6],   # Reduced from [4, 6, 6, 8]
+        #     'num_refinement_blocks': 2,   # Reduced from 4
+        #     'heads': [1, 2, 4, 8],        # Kept same (compatible with dim=32)
+        #     'ffn_expansion_factor': 2.0,  # Reduced from 2.66 (Saves FFN memory)
+        #     'bias': False,
+        #     'LayerNorm_type': 'WithBias',
+        #     'dual_pixel_task': False,
+        # },
+
         'compression': {
             'matrix_init': 'blocksum',
-            'matrix_learned': 'learned',
+            'matrix_learned': 'fixed',
             'compression_factor': 8,
             'input_size': 128,
             'upsampler': 'pinv',
