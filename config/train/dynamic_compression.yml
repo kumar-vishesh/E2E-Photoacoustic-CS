@@ -2,7 +2,7 @@
 # E2E Compressed Sensing Config for NAFNet Backbone
 # ------------------------------------------------------------------------
 
-name: Blocksum_8x_BeamformedL1_025_DirectionalResponse_Restormer
+name: Blocksum_8x_CompleteLoss_025_DirectionalResponse
 model_type: E2ECompressedSensing
 scale: 1
 num_gpu: 1
@@ -52,27 +52,34 @@ datasets:
     phase: test
     save_debug_data: true
 
-# network_g:
-#   type: NAFNet
-#   img_channel: 1
-#   width: 32
-#   enc_blk_nums: [1, 1, 1, 28]
-#   middle_blk_num: 1
-#   dec_blk_nums: [1, 1, 1, 1]
-
-# network structures
 network_g:
-  type: Restormer
-  inp_channels: 1
-  out_channels: 1
-  dim: 32                    # Reduced from 48 (Major memory saver)
-  num_blocks: [2, 4, 4, 6]   # Reduced from [4, 6, 6, 8]
-  num_refinement_blocks: 2   # Reduced from 4
-  heads: [1, 2, 4, 8]        # Kept same (compatible with dim=32)
-  ffn_expansion_factor: 2.0  # Reduced from 2.66 (Saves FFN memory)
-  bias: False
-  LayerNorm_type: WithBias
-  dual_pixel_task: False
+  type: NAFNet
+  img_channel: 1
+  width: 32
+  enc_blk_nums: [1, 1, 1, 28]
+  middle_blk_num: 1
+  dec_blk_nums: [1, 1, 1, 1]
+
+# Slightly more memory efficient Restormer configuration (compared to the one in the paper)
+# network_g:
+#   type: Restormer
+#   inp_channels: 1
+#   out_channels: 1
+#   dim: 32                    
+#   num_blocks: [2, 4, 4, 6]  
+#   num_refinement_blocks: 2   
+#   heads: [1, 2, 4, 8]        
+#   ffn_expansion_factor: 2.0  
+#   bias: False
+#   LayerNorm_type: WithBias
+#   dual_pixel_task: False
+
+# Potential pixelwise MLP
+# network_g:
+#   type: MLP
+#   size: 131072
+#   hidden_layers: 1
+#   omega_0: 30
 
 compression:
   matrix_init: blocksum       # Options: blocksum, blockwise_random, fully_random, naive, gaussian(note this doesn't satisfy out harware params)
@@ -97,7 +104,7 @@ train:
     weight_decay: !!float 1e-3
     betas: [0.9, 0.9]
 
-  scheduler:
+  scheduler: 
     type: TrueCosineAnnealingLR
     T_max: 200000
     eta_min: !!float 1e-7
@@ -106,11 +113,18 @@ train:
   warmup_iter: -1
 
   pixel_opt:
-    type: BeamformedL1Loss
-    loss_weight: 1
-    reduction: mean
+    - type: BeamformedL1Loss
+      loss_weight: 1
+      reduction: mean
 
-# gain_weight: 0.2625  # Gain weight in dB per pixel, e.g., 0.2625 for 70 dB over 267 pixels
+    - type: TGCMetric
+      loss_weight: !!float 1e-3
+      reduction: mean
+
+    - type: ConsistencyLoss
+      loss_weight: !!float 1e-2
+      reduction: mean
+    # compression_frontend: self.frontend
 
 val:
   val_freq: !!float 1e4

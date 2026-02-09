@@ -10,6 +10,7 @@
 import importlib
 import torch
 import torch.nn.functional as F
+from torch import nn
 from collections import OrderedDict
 from copy import deepcopy
 from os import path as osp
@@ -62,12 +63,34 @@ class E2ECompressedSensing(BaseModel):
         self.frontend.train()
         train_opt = self.opt['train']
 
-        # define losses
+        # --- PIXEL LOSS SETUP (Refactored for List Support) ---
         if train_opt.get('pixel_opt'):
-            pixel_type = train_opt['pixel_opt'].pop('type')
-            cri_pix_cls = getattr(loss_module, pixel_type)
-            self.cri_pix = cri_pix_cls(**train_opt['pixel_opt']).to(
-                self.device)
+            pixel_opt_config = train_opt['pixel_opt']
+            
+            # Ensure it is a list. If user provided a single dict (old style), make it a list.
+            if isinstance(pixel_opt_config, dict):
+                pixel_opt_config = [pixel_opt_config]
+
+            loss_instances = []
+            
+            for opt_item in pixel_opt_config:
+                # Copy to avoid modifying the global config
+                opt_params = opt_item.copy()
+                loss_type = opt_params.pop('type')
+
+                # === INJECTION LOGIC ===
+                # Inject frontend only for ConsistencyLoss
+                if loss_type == 'ConsistencyLoss':
+                    opt_params['compression_frontend'] = self.frontend
+                # =======================
+
+                # Initialize the specific loss class
+                loss_cls = getattr(loss_module, loss_type)
+                loss_obj = loss_cls(**opt_params).to(self.device)
+                loss_instances.append(loss_obj)
+
+            # Wrap all instances into one CombinedLoss module
+            self.cri_pix = CombinedLoss(loss_instances).to(self.device)
         else:
             self.cri_pix = None
 
@@ -479,3 +502,15 @@ class E2ECompressedSensing(BaseModel):
                 results[name] /= pixel_counts[name]
 
         return results
+
+class CombinedLoss(nn.Module):
+    def __init__(self, loss_modules):
+        super(CombinedLoss, self).__init__()
+        self.losses = nn.ModuleList(loss_modules)
+
+    def forward(self, *args, **kwargs):
+        total_loss = 0
+        for loss_func in self.losses:
+            # Sum up the return value of each loss
+            total_loss += loss_func(*args, **kwargs)
+        return total_loss

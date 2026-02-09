@@ -161,7 +161,7 @@ class TGCMetric(nn.Module):
         z = torch.arange(size).float() * resolution
         z = z + resolution 
 
-        # 2. Absorption Component (Linear-in-dB)
+        # 2. Absorption Component (Linear-in-dB-in-Time)
         # dB_factor = 10^(dB/20) which is equivalent to e^(dB * ln(10) / 20)
         absorption_gain = torch.exp(tgc_weight * z / 20 * np.log(10))
 
@@ -286,6 +286,53 @@ class BeamformedL1Loss(nn.Module):
             loss = torch.mean(loss)
 
         return self.loss_weight * loss
+
+class ConsistencyLoss(nn.Module):
+    """
+    Consistency Loss that allows gradients to flow back into the Compression Frontend.
+    """
+    def __init__(self, loss_weight=1.0, compression_frontend=None, reduction='mean'):
+        super(ConsistencyLoss, self).__init__()
+        
+        if reduction not in ['none', 'mean', 'sum']:
+            raise ValueError(f'Unsupported reduction mode: {reduction}.')
+
+        self.loss_weight = loss_weight
+        self.reduction = reduction
+        
+        if compression_frontend is None:
+            raise ValueError("A compression frontend must be provided for ConsistencyLoss.")
+        
+        # 1. Store the module reference directly. 
+        # PyTorch sees this as a submodule. When you call loss.to(device), 
+        # it ensures the frontend is on the device (safe even if done twice).
+        self.compression_frontend = compression_frontend
+
+    def forward(self, pred, target, weight=None, **kwargs):
+        # 2. Dynamically access the matrix. 
+        # This returns the live nn.Parameter (or buffer) attached to the graph.
+        # This is CRITICAL for gradients to flow back to A.
+        A = self.compression_frontend.get_matrix()
+        
+        # Apply compression (same logic as your frontend)
+        # Assuming pred shape is (N, 1, T, C) and we compress T (dim 2)
+        pred_cs = (pred.permute(0,1,3,2) @ A.t()).permute(0,1,3,2)
+        target_cs = (target.permute(0,1,3,2) @ A.t()).permute(0,1,3,2)
+        
+        loss = F.l1_loss(pred_cs, target_cs, reduction='none') 
+        
+        if weight is not None:
+            if weight.ndim == 4 and weight.shape[1] == 1:
+                weight = weight.squeeze(1)
+            loss = loss * weight
+            
+        if self.reduction == 'sum':
+            loss = torch.sum(loss)
+        elif self.reduction == 'mean':
+            loss = torch.mean(loss)
+            
+        return self.loss_weight * loss
+
         
 if __name__ == '__main__':
     # Example usage
